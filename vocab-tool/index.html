@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>词汇增强</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 10px; margin: 0; }
+        p { margin: 8px 0 4px 0; font-size: 13px; }
+        button { padding: 8px 16px; margin-right: 6px; cursor: pointer; border-radius: 4px; border: none; font-size: 12px; }
+        textarea { font-family: Consolas, monospace; font-size: 13px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        .word-tag { display: inline-block; padding: 3px 10px; margin: 3px 4px 3px 0; border-radius: 12px; font-size: 12px; cursor: pointer; border: 1px solid; }
+        .word-tag:hover { opacity: 0.8; }
+        .word-tag.active { outline: 2px solid #333; outline-offset: 1px; }
+        #highlightBtn { background: white; color: #2b579a; border: 2px solid #2b579a; }
+        #replaceBtn { background: #2b579a; color: white; }
+        #clearBtn { background: white; color: #d32f2f; border: 1px solid #d32f2f; }
+        #clearHLBtn { background: white; color: #e65100; border: 1px solid #e65100; }
+        #prevBtn, #nextBtn { padding: 4px 12px; margin-right: 4px; cursor: pointer; border-radius: 4px; border: 1px solid #2b579a; background: white; color: #2b579a; font-size: 12px; }
+        #prevBtn:hover, #nextBtn:hover { background: #2b579a; color: white; }
+        #navBtns { margin-top: 3px; display: none; }
+        #navInfo { font-size: 12px; color: #666; margin-left: 6px; }
+        #resultArea { display: none; margin-top: 3px; padding: 10px; background: #f8f8f8; border-left: 4px solid #2b579a; }
+        #statusText { color: #2b579a; font-size: 12px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <p><b>待替换原词</b>
+    <label style="margin-left:12px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" id="specialCharCheck" style="vertical-align:middle;">
+        <span style="color:#2b579a;">识别特殊字符 (^p ^m ^t ^l ^n)</span>
+    </label>
+    <label style="margin-left:12px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" id="wildcardCheck" style="vertical-align:middle;">
+        <span style="color:#2b579a;">使用通配符模式 (Word Wildcard)</span>
+    </label>
+    <label style="margin-left:12px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" id="highlightCheck" checked style="vertical-align:middle;">
+        <span style="color:#2b579a;">高亮颜色</span>
+    </label></p>
+    <textarea id="sourceWords" rows="5" placeholder="例如：我觉得&#10;核心指标&#10;支持 ^p ^m ^t ^l 等特殊字符"></textarea>
+    <div id="wordTags" style="margin-top:3px;"></div>
+    <div id="navBtns">
+        <button id="prevBtn">&#9650; 上一个</button>
+        <button id="nextBtn">&#9660; 下一个</button>
+        <span id="navInfo"></span>
+    </div>
+
+    <p><b>目标替换词</b>（对应行）
+        <span style="font-size:11px;color:#888;"> 支持 ^p ^m ^t ^l ^n</span>
+    </p>
+    <textarea id="targetWords" rows="5" placeholder="例如：本人认为&#10;KPI&#10;支持 ^p(换段) ^m(分页) ^t(制表)"></textarea>
+
+    <br><br>
+    <button id="highlightBtn">统计并高亮</button>
+    <button id="replaceBtn">执行替换</button>
+    <button id="clearHLBtn">清除高亮</button>
+    <button id="clearBtn">清空全部</button>
+
+    <div id="resultArea">
+        <b>操作结果：</b>
+        <div id="resultContent"></div>
+    </div>
+
+    <br><hr style="border:none;border-top:1px solid #ddd;">
+    <p><b>批量处理 .docx 文件</b>
+        <span style="font-size:11px;color:#888;">（使用上方替换规则，将处理后的文件打包下载）</span>
+    </p>
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+        <input type="file" id="batchFileInput" multiple accept=".docx" style="display:none;">
+        <button id="batchSelectBtn" style="background:white;color:#2b579a;border:2px solid #2b579a;">选择文件</button>
+        <button id="batchReplaceBtn" style="background:#2b579a;color:white;">开始批量替换</button>
+        <button id="batchOverwriteBtn" style="background:#d32f2f;color:white;display:none;">覆盖原文件</button>
+        <button id="batchDownloadBtn" style="background:white;color:#00897b;border:2px solid #00897b;display:none;">下载全部 (ZIP)</button>
+    </div>
+    <div id="batchFileList" style="margin-top:4px;font-size:12px;color:#888;">
+        未选择文件
+    </div>
+    <div id="batchResultArea" style="display:none;margin-top:6px;padding:8px;background:#f0f8ff;border-left:4px solid #2b579a;max-height:200px;overflow-y:auto;font-size:12px;"></div>
+    <p id="batchStatus" style="color:#2b579a;font-size:12px;margin-top:4px;display:none;"></p>
+
+    <p id="statusText">就绪</p>
+
+<!-- ====== 自定义确认对话框（替代 confirm，避免 Office iframe 限制） ====== -->
+<div id="confirmOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.4);z-index:9999;justify-content:center;align-items:center;">
+    <div style="background:#fff;border-radius:8px;padding:20px 24px;max-width:500px;width:90%;
+        box-shadow:0 4px 20px rgba(0,0,0,0.25);">
+        <div style="font-size:14px;font-weight:bold;margin-bottom:10px;color:#333;">确认覆盖文件</div>
+        <div id="confirmBody" style="font-size:12px;color:#555;max-height:250px;overflow-y:auto;
+            white-space:pre-wrap;line-height:1.6;margin-bottom:14px;"></div>
+        <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+            <button id="confirmCancel" class="btn-outline" style="font-size:12px;padding:6px 16px;background:white;color:#2b579a;border:1px solid #2b579a;">取消</button>
+            <button id="confirmOk" class="btn-primary" style="font-size:12px;padding:6px 16px;background:#d32f2f;color:white;border:none;">确认覆盖</button>
+        </div>
+    </div>
+</div>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+    var statusEl, srcEl, tgtEl, resultArea, resultContent, wordTagsEl, wildcardCheckEl, specialCharCheckEl;
+    var navState = { word: '', colorIndex: 0, currentPos: 0, totalCount: 0 };
+    var HIGHLIGHT_COLORS = ['#FFFF00', '#00FFFF', '#FF00FF', '#00FF00', '#FF6600', '#9933FF', '#FF0000', '#00CCFF', '#FFCC00', '#66FF66', '#FF99CC', '#CC99FF'];
+
+    function getColor(index) { return HIGHLIGHT_COLORS[index % HIGHLIGHT_COLORS.length]; }
+
+    // ========== Word 特殊字符支持 ==========
+    // 用户输入 → Word 通配符查找码
+    var SPECIAL_TO_WILDCARD = {
+        '^p': '^13',   // 段落标记
+        '^m': '^12',   // 手动分页符
+        '^t': '^t',    // 制表符
+        '^l': '^11',   // 手动换行符
+        '^n': '^14'    // 分栏符
+    };
+
+    // 用户输入 → 实际控制字符（用于替换）
+    var STRUCT_REAL = {
+        '^p': '\r',
+        '^m': '\f',
+        '^t': '\t',
+        '^l': '\v',
+        '^n': '\x0E'
+    };
+
+    // Word 通配符模式专用码
+    var WILDCARD_MAP = {
+        '^#': '[0-9]',
+        '^$': '[A-Za-z]',
+        '^w': '[ ^s]{1,}',
+        '^?': '?',
+        '^^': '^^'
+    };
+
+    function hasStructuralSpecial(text) { return /\^[pmtln]/.test(text); }
+
+    // 核心：将用户输入转为 Word body.search 可用的查找文本
+    // useSpecial: 是否识别 ^p ^m ^t ^l ^n
+    // useWildcard: 用户是否勾选通配符模式
+    // 返回 { text: 查找文本, wildcard: 是否用通配符模式 }
+    function toSearchText(text, useSpecial, useWildcard) {
+        // 都不勾选 → 普通文本查找
+        if (!useSpecial && !useWildcard) return { text: text, wildcard: false };
+
+        var result = '';
+        // needEscape: 因为特殊字符自动启用了通配符模式，但用户未要求通配符，
+        //             需要把普通文本中的通配符元字符转义掉（用 [...] 包裹）
+        var needEscape = useSpecial && !useWildcard;
+        var i = 0;
+
+        while (i < text.length) {
+            if (text[i] === '^' && (i + 1) < text.length) {
+                var code = text.substring(i, i + 2);
+                // 1) 结构字符 → Word 通配符码
+                if (useSpecial && SPECIAL_TO_WILDCARD.hasOwnProperty(code)) {
+                    result += SPECIAL_TO_WILDCARD[code];
+                    i += 2;
+                    continue;
+                }
+                // 2) 通配符专用码 (^#, ^$, ^w, ^?, ^^)
+                if (WILDCARD_MAP.hasOwnProperty(code)) {
+                    result += WILDCARD_MAP[code];
+                    i += 2;
+                    continue;
+                }
+            }
+            // 3) 普通字符：需要转义时包裹在 [] 中作为字面量匹配
+            var ch = text[i];
+            if (needEscape) {
+                if ('[]{}()<>~*!@&|'.indexOf(ch) >= 0 || ch === '\\' || ch === '?') {
+                    result += '[' + ch + ']';
+                } else {
+                    result += ch;
+                }
+            } else {
+                result += ch;
+            }
+            i++;
+        }
+        return { text: result, wildcard: true };
+    }
+
+    // 转换替换文本中的特殊字符 → 实际控制字符
+    function toReplaceText(text) {
+        var s = text;
+        for (var k in STRUCT_REAL) { s = s.split(k).join(STRUCT_REAL[k]); }
+        return s;
+    }
+
+    function hasReplaceSpecial(text) { return /\^[pmtln]/.test(text); }
+    function replaceRangeWithSegments(range, text) {
+        range.insertText(hasReplaceSpecial(text) ? toReplaceText(text) : text, Word.InsertLocation.replace);
+    }
+
+    // 统一的查找函数
+    function getSearchFn(word) {
+        var useSpecial = specialCharCheckEl && specialCharCheckEl.checked;
+        var useWildcard = wildcardCheckEl && wildcardCheckEl.checked;
+        var converted = toSearchText(word, useSpecial, useWildcard);
+        return {
+            text: converted.text,
+            wildcard: converted.wildcard
+        };
+    }
+
+    // ========== 批量处理 .docx 文件 ==========
+    var WML_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    var batchFiles = {};
+    var batchResults = [];
+    var batchHandles = {};  // {filename: FileSystemFileHandle} 可写句柄
+
+    // 获取元素的纯名称（去除 w: 前缀，兼容有/无 namespace 的 DOM）
+    function elemName(node) {
+        if (node.nodeType !== 1) return '';
+        var ln = node.localName;
+        if (ln) return ln;
+        var tn = node.tagName || '';
+        var c = tn.indexOf(':');
+        return c >= 0 ? tn.substring(c + 1) : tn;
+    }
+
+    // FIXED: 使用 createElementNS 确保新元素带有正确的 WML namespace，
+    // 避免混入无命名空间元素导致 Word 无法解析 → 文件损坏
+    function createWmlElement(doc, name) {
+        var colonPos = name.indexOf(':');
+        var localName = colonPos >= 0 ? name.substring(colonPos + 1) : name;
+        return doc.createElementNS(WML_NS, 'w:' + localName);
+    }
+
+    // 把已转换的控制字符字符串（\f \x0E \r \v \t）重新拆分为结构化 parts
+    function reparseReplacement(text) {
+        var parts = [];
+        var buf = '';
+        for (var i = 0; i < text.length; i++) {
+            var ch = text[i];
+            if (ch === '\f') {          // ^m 分页
+                if (buf) { parts.push({type:'text', text:buf}); buf=''; }
+                parts.push({type:'br', attr:'page'});
+            } else if (ch === '\x0E') {  // ^n 分栏
+                if (buf) { parts.push({type:'text', text:buf}); buf=''; }
+                parts.push({type:'br', attr:'column'});
+            } else if (ch === '\v') {    // ^l 换行
+                if (buf) { parts.push({type:'text', text:buf}); buf=''; }
+                parts.push({type:'br', attr:null});
+            } else if (ch === '\r') {    // ^p 段落
+                if (buf) { parts.push({type:'text', text:buf}); buf=''; }
+                parts.push({type:'paragraph'});
+            } else if (ch === '\t') {    // ^t 制表
+                if (buf) { parts.push({type:'text', text:buf}); buf=''; }
+                parts.push({type:'tab'});
+            } else {
+                buf += ch;
+            }
+        }
+        if (buf) parts.push({type:'text', text:buf});
+        return parts;
+    }
+
+    function doBatchSelect() {
+        // 优先使用 File System Access API：拿到可读可写的文件句柄
+        if (window.showOpenFilePicker) {
+            window.showOpenFilePicker({
+                multiple: true,
+                types: [{
+                    description: 'Word 文档',
+                    accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] }
+                }]
+            }).then(function(handles) {
+                batchHandles = {};
+                batchFiles = {};
+                batchResults = [];
+                var readPromises = [];
+                for (var i = 0; i < handles.length; i++) {
+                    (function(handle) {
+                        readPromises.push(
+                            handle.getFile().then(function(file) {
+                                batchHandles[file.name] = handle;
+                                batchFiles[file.name] = file;
+                            })
+                        );
+                    })(handles[i]);
+                }
+                return Promise.all(readPromises);
+            }).then(function() {
+                updateBatchFileList();
+                document.getElementById('batchDownloadBtn').style.display = 'none';
+                document.getElementById('batchResultArea').style.display = 'none';
+                document.getElementById('batchResultArea').innerHTML = '';
+                document.getElementById('batchStatus').style.display = 'none';
+                document.getElementById('batchOverwriteBtn').style.display = 'none';
+            }).catch(function(e) {
+                if (e && e.name === 'AbortError') return;
+                // API 报错 → 回退到传统 <input type="file">
+                document.getElementById('batchFileInput').click();
+            });
+        } else {
+            document.getElementById('batchFileInput').click();
+        }
+    }
+
+    function onBatchFilesChanged(evt) {
+        batchHandles = {};  // 传统 input 模式没有写入句柄
+        batchFiles = {};
+        batchResults = [];
+        var files = evt.target.files;
+        for (var i = 0; i < files.length; i++) {
+            batchFiles[files[i].name] = files[i];
+        }
+        updateBatchFileList();
+        document.getElementById('batchDownloadBtn').style.display = 'none';
+        document.getElementById('batchResultArea').style.display = 'none';
+        document.getElementById('batchResultArea').innerHTML = '';
+        document.getElementById('batchOverwriteBtn').style.display = 'none';
+    }
+
+    function updateBatchFileList() {
+        var names = Object.keys(batchFiles);
+        var el = document.getElementById('batchFileList');
+        if (names.length === 0) { el.innerHTML = '未选择文件'; return; }
+        var html = '已加载 <b>' + names.length + '</b> 个文件:<br>';
+        for (var i = 0; i < names.length; i++) {
+            html += '<span style="font-size:11px;">&#8226; ' + escapeHtml(names[i]) + '</span><br>';
+        }
+        el.innerHTML = html;
+    }
+
+    // ===== 核心修复：用 elemName() 替代 localName，兼容 Office iframe 的 DOMParser =====
+
+    function buildParagraphSegments(paraEl) {
+        var segs = [];
+        function walk(node) {
+            if (node.nodeType !== 1) return;
+            var en = elemName(node);
+            if (en === 't' || en === 'delText' || en === 'instrText') {
+                segs.push({ type: 'text', tEl: node, text: node.textContent || '' });
+                return;
+            }
+            if (en === 'tab') {
+                segs.push({ type: 'tab', marker: '\t', node: node });
+                return;
+            }
+            if (en === 'br') {
+                var bt = node.getAttribute('w:type') || '';
+                if (bt === 'page')       segs.push({ type: 'br', marker: '\f', node: node });
+                else if (bt === 'column') segs.push({ type: 'br', marker: '\x0E', node: node });
+                else                      segs.push({ type: 'br', marker: '\v', node: node });
+                return;
+            }
+            for (var ci = 0; ci < node.childNodes.length; ci++) {
+                walk(node.childNodes[ci]);
+            }
+        }
+        walk(paraEl);
+        return segs;
+    }
+
+    function segmentsToText(segs) {
+        var t = '';
+        for (var i = 0; i < segs.length; i++) {
+            t += (segs[i].type === 'text') ? segs[i].text : segs[i].marker;
+        }
+        return t;
+    }
+
+    function replaceInSegments(segs, regex, replacement, paraEl) {
+        var text = segmentsToText(segs);
+        var hasCtrl = /[\f\x0E\r\v\t]/.test(replacement);
+        var positions = [];
+        var pos = 0;
+        for (var i = 0; i < segs.length; i++) {
+            var len = (segs[i].type === 'text') ? segs[i].text.length : 1;
+            positions.push({ start: pos, end: pos + len });
+            pos += len;
+        }
+        regex.lastIndex = 0;
+        var matches = [];
+        var m;
+        while ((m = regex.exec(text)) !== null) {
+            matches.push({ index: m.index, end: m.index + m[0].length });
+            if (m[0].length === 0) regex.lastIndex++;
+        }
+        if (matches.length === 0) return 0;
+
+        for (var mi = matches.length - 1; mi >= 0; mi--) {
+            var ms = matches[mi].index;
+            var me = matches[mi].end;
+            var firstSeg = -1, lastSeg = -1;
+            for (var si = 0; si < positions.length; si++) {
+                if (firstSeg < 0 && positions[si].end > ms) firstSeg = si;
+                if (positions[si].start < me) lastSeg = si;
+            }
+            if (firstSeg < 0 || lastSeg < 0) continue;
+            var txtIdx = [];
+            for (var si = firstSeg; si <= lastSeg; si++) {
+                if (segs[si].type === 'text') txtIdx.push(si);
+            }
+            if (txtIdx.length === 0) {
+                applyStructuralReplacement(segs, firstSeg, lastSeg, ms, me, positions, replacement);
+                continue;
+            }
+            var fi = txtIdx[0];
+            var li = txtIdx[txtIdx.length - 1];
+            var prefixLen = ms - positions[fi].start;
+            if (prefixLen < 0) prefixLen = 0;
+            var suffixLen = positions[li].end - me;
+            if (suffixLen < 0) suffixLen = 0;
+
+            if (hasCtrl) {
+                // 结构化替换：不把控制字符写入 w:t 文本节点（会损坏 docx）
+                if (txtIdx.length > 1) continue;
+                var seg = segs[fi];
+                var tNode = seg.tEl;
+                if (!tNode) continue;
+                var doc = tNode.ownerDocument;
+                if (!doc) {
+                    var fb = seg.text.substring(0, prefixLen) + replacement + seg.text.substring(seg.text.length - suffixLen);
+                    seg.text = fb;
+                    tNode.textContent = fb;
+                    continue;
+                }
+                var parentR = tNode.parentNode;
+                var rplSuffix = suffixLen > 0 ? seg.text.substring(seg.text.length - suffixLen) : '';
+
+                // 写入前缀
+                tNode.textContent = seg.text.substring(0, prefixLen);
+                seg.text = tNode.textContent;
+
+                // 解析 replacement → 结构化 parts
+                var parts = reparseReplacement(replacement);
+
+                var curRun = parentR;
+                var refNode = parentR.nextSibling;
+
+                for (var pi = 0; pi < parts.length; pi++) {
+                    var part = parts[pi];
+                    if (part.type === 'text' && part.text) {
+                        var newR = createWmlElement(doc, 'w:r');
+                        var newT = createWmlElement(doc, 'w:t');
+                        newT.textContent = part.text;
+                        newR.appendChild(newT);
+                        // 判断是在段落内插入还是追加到段落末尾
+                        if (refNode !== null) {
+                            curRun.parentNode.insertBefore(newR, refNode);
+                        } else {
+                            curRun.appendChild(newR);
+                        }
+                        curRun = newR;
+                    } else if (part.type === 'br') {
+                        var newBr = createWmlElement(doc, 'w:br');
+                        if (part.attr) newBr.setAttribute('w:type', part.attr);
+                        curRun.appendChild(newBr);
+                    } else if (part.type === 'tab') {
+                        curRun.appendChild(createWmlElement(doc, 'w:tab'));
+                    } else if (part.type === 'paragraph') {
+                        // ^p: 创建新段落，将后续内容移入
+                        var parentP = curRun.parentNode;
+                        var newPara = createWmlElement(doc, 'w:p');
+                        // 将 refNode 及其后的兄弟节点移到新段落
+                        if (refNode !== null) {
+                            var moveList = [];
+                            var node = refNode;
+                            while (node) {
+                                moveList.push(node);
+                                node = node.nextSibling;
+                            }
+                            for (var mi = 0; mi < moveList.length; mi++) {
+                                newPara.appendChild(moveList[mi]);
+                            }
+                        }
+                        parentP.parentNode.insertBefore(newPara, parentP.nextSibling);
+                        curRun = newPara;
+                        refNode = null;
+                    }
+                }
+
+                if (rplSuffix) {
+                    if (curRun && elemName(curRun) === 'p') {
+                        // curRun 是段落，suffix 放入段落内
+                        var sfRun = createWmlElement(doc, 'w:r');
+                        var sfT = createWmlElement(doc, 'w:t');
+                        sfT.textContent = rplSuffix;
+                        sfRun.appendChild(sfT);
+                        curRun.appendChild(sfRun);
+                    } else {
+                        var sfRun = createWmlElement(doc, 'w:r');
+                        var sfT = createWmlElement(doc, 'w:t');
+                        sfT.textContent = rplSuffix;
+                        sfRun.appendChild(sfT);
+                        curRun.parentNode.insertBefore(sfRun, curRun.nextSibling);
+                    }
+                }
+            } else if (txtIdx.length === 1) {
+                var seg = segs[fi];
+                var newText = seg.text.substring(0, prefixLen) + replacement + seg.text.substring(seg.text.length - suffixLen);
+                seg.text = newText;
+                seg.tEl.textContent = newText;
+            } else {
+                segs[fi].text = segs[fi].text.substring(0, prefixLen) + replacement;
+                segs[fi].tEl.textContent = segs[fi].text;
+                for (var ai = 1; ai < txtIdx.length - 1; ai++) {
+                    segs[txtIdx[ai]].text = '';
+                    segs[txtIdx[ai]].tEl.textContent = '';
+                }
+                if (txtIdx.length > 1) {
+                    segs[li].text = suffixLen > 0 ? segs[li].text.substring(segs[li].text.length - suffixLen) : '';
+                    segs[li].tEl.textContent = segs[li].text;
+                }
+            }
+        }
+        return matches.length;
+    }
+
+    // 匹配只落在 br/tab 结构元素上时，修改 XML 节点属性（如 ^l→^m：换行改分页）
+    function applyStructuralReplacement(segs, firstSeg, lastSeg, ms, me, positions, replacement) {
+        var targetMarker, attrValue;
+        if (replacement === '\f')       { targetMarker = '\f'; attrValue = 'page'; }
+        else if (replacement === '\x0E') { targetMarker = '\x0E'; attrValue = 'column'; }
+        else if (replacement === '\v')   { targetMarker = '\v'; attrValue = null; }
+        else if (replacement === '\t')   { targetMarker = '\t'; }
+        else return;
+
+        for (var si = firstSeg; si <= lastSeg; si++) {
+            if (segs[si].type !== 'br') continue;
+            if (positions[si].start < ms || positions[si].end > me) continue;
+            if (attrValue === null) {
+                segs[si].node.removeAttribute('w:type');
+            } else if (attrValue) {
+                segs[si].node.setAttribute('w:type', attrValue);
+            }
+            segs[si].marker = targetMarker;
+        }
+    }
+
+    function buildBatchRegex(searchText, useSpecial, useWildcard) {
+        var pattern = '';
+        var i = 0;
+        while (i < searchText.length) {
+            if (searchText[i] === '^' && i + 1 < searchText.length) {
+                var code = searchText.substring(i, i + 2);
+                if (useSpecial && STRUCT_REAL.hasOwnProperty(code)) {
+                    var r = STRUCT_REAL[code];
+                    if (r === '\r')      pattern += '\\r';
+                    else if (r === '\f')  pattern += '\\f';
+                    else if (r === '\t')  pattern += '\\t';
+                    else if (r === '\v')  pattern += '\\v';
+                    else                  pattern += '\\x0E';
+                    i += 2; continue;
+                }
+                if (WILDCARD_MAP.hasOwnProperty(code)) {
+                    pattern += WILDCARD_MAP[code];
+                    i += 2; continue;
+                }
+            }
+            var ch = searchText[i];
+            if (useWildcard) {
+                pattern += ch;
+            } else {
+                if ('\\^$*+?.()|{}[]'.indexOf(ch) >= 0) pattern += '\\' + ch;
+                else pattern += ch;
+            }
+            i++;
+        }
+        try { return new RegExp(pattern, 'gi'); }
+        catch (e) { return null; }
+    }
+
+    function getDocxParagraphs(bodyEl) {
+        var paras = [];
+        var queue = [bodyEl];
+        while (queue.length > 0) {
+            var node = queue.shift();
+            for (var c = 0; c < node.childNodes.length; c++) {
+                var child = node.childNodes[c];
+                if (child.nodeType !== 1) continue;
+                var en = elemName(child);
+                if (en === 'p') {
+                    paras.push(child);
+                } else if (en === 'tbl' || en === 'sdt') {
+                    // 用 getElementsByTagName 做广泛搜索（兼容无命名空间）
+                    var inner1 = child.getElementsByTagName('w:p');
+                    var inner2 = child.getElementsByTagName('p');
+                    for (var ip = 0; ip < inner1.length; ip++) { paras.push(inner1[ip]); }
+                    for (var ip2 = 0; ip2 < inner2.length; ip2++) {
+                        if (inner1.length === 0 || inner2[ip2] !== inner1[ip2]) { paras.push(inner2[ip2]); }
+                    }
+                } else if (en === 'sectPr' || en === 'bookmarkStart' || en === 'bookmarkEnd') {
+                } else if (en === 'customXml' || en === 'permStart' || en === 'permEnd') {
+                } else { queue.push(child); }
+            }
+        }
+        return paras;
+    }
+
+    function processAllReplacements(paras, pairs, useSpecial, useWildcard) {
+        var allStats = [];
+        var totalChanges = 0;
+        for (var pi = 0; pi < pairs.length; pi++) {
+            var src = pairs[pi].src;
+            var tgt = pairs[pi].tgt;
+            if (!src) continue;
+            var realTgt = hasReplaceSpecial(tgt) ? toReplaceText(tgt) : tgt;
+            var changes = 0;
+            if (useSpecial && hasStructuralSpecial(src) && /\^p/.test(src)) {
+                changes = replaceCrossParagraph(paras, src, realTgt, useSpecial, useWildcard);
+            } else {
+                var regex = buildBatchRegex(src, useSpecial, useWildcard);
+                if (!regex) { allStats.push('"' + src + '" : 正则错误'); continue; }
+                for (var i = 0; i < paras.length; i++) {
+                    var segs = buildParagraphSegments(paras[i]);
+                    if (segs.length === 0) continue;
+                    changes += replaceInSegments(segs, new RegExp(regex.source, regex.flags), realTgt, paras[i]);
+                }
+            }
+            totalChanges += changes;
+            if (changes > 0) allStats.push('"' + src + '"→"' + tgt + '" : ' + changes + '处');
+            else allStats.push('"' + src + '" : 未找到');
+        }
+        return { stats: allStats.join('; '), changes: totalChanges };
+    }
+
+    function replaceCrossParagraph(paras, src, realTgt, useSpecial, useWildcard) {
+        var srcParts = src.split('^p');
+        var allEmpty = true;
+        for (var sp = 0; sp < srcParts.length; sp++) {
+            if (srcParts[sp] !== '') { allEmpty = false; break; }
+        }
+        if (allEmpty) return 0;
+        var n = srcParts.length;
+        var tgtParts = realTgt.split('\r');
+        var changes = 0;
+        var regexParts = [];
+        for (var sp = 0; sp < n; sp++) {
+            if (srcParts[sp] === '') regexParts.push(null);
+            else regexParts.push(buildBatchRegex(srcParts[sp], useSpecial, useWildcard));
+        }
+        for (var i = paras.length - n; i >= 0; i--) {
+            var ok = true;
+            for (var j = 0; j < n; j++) {
+                if (!regexParts[j]) continue;
+                var segs = buildParagraphSegments(paras[i + j]);
+                var txt = segmentsToText(segs);
+                regexParts[j].lastIndex = 0;
+                if (!regexParts[j].test(txt)) { ok = false; break; }
+            }
+            if (!ok) continue;
+            for (var j = 0; j < n; j++) {
+                var segs = buildParagraphSegments(paras[i + j]);
+                if (segs.length === 0) continue;
+                var tp = (j < tgtParts.length) ? tgtParts[j] : '';
+                if (regexParts[j]) {
+                    replaceInSegments(segs, new RegExp(regexParts[j].source, regexParts[j].flags), tp, paras[i + j]);
+                } else {
+                    replaceInSegments(segs, /[\s\S]*/, tp, paras[i + j]);
+                }
+            }
+            changes++;
+        }
+        return changes;
+    }
+
+    function readFileAsArrayBuffer(file, callback) {
+        var reader = new FileReader();
+        reader.onload = function(e) { callback(null, e.target.result); };
+        reader.onerror = function(e) { callback(e, null); };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function processSingleDocx(fileName, fileData, pairs, useSpecial, useWildcard, callback) {
+        try {
+            JSZip.loadAsync(fileData).then(function(zip) {
+                var docEntry = zip.file('word/document.xml');
+                if (!docEntry) { callback(fileName, false, '找不到 word/document.xml', null); return; }
+                return docEntry.async('string').then(function(xmlString) {
+                    var parser = new DOMParser();
+                    var xmlDoc = parser.parseFromString(xmlString, 'text/xml');
+                    var errorNode = xmlDoc.getElementsByTagName('parsererror');
+                    if (errorNode && errorNode.length > 0) {
+                        callback(fileName, false, 'XML解析失败', null);
+                        return;
+                    }
+
+                    // 查找 body：先 NS，再 tag，再遍历
+                    var bodyEl = xmlDoc.getElementsByTagNameNS(WML_NS, 'body')[0];
+                    if (!bodyEl) bodyEl = xmlDoc.getElementsByTagName('w:body')[0];
+                    if (!bodyEl) {
+                        var allEls = xmlDoc.getElementsByTagName('*');
+                        for (var ae = 0; ae < allEls.length; ae++) {
+                            if (elemName(allEls[ae]) === 'body') { bodyEl = allEls[ae]; break; }
+                        }
+                    }
+                    if (!bodyEl) { callback(fileName, false, '找不到 body 元素', null); return; }
+
+                    var paras = getDocxParagraphs(bodyEl);
+                    if (paras.length === 0) {
+                        callback(fileName, false, '没有找到段落(body子节点=' + bodyEl.childNodes.length + ')', null);
+                        return;
+                    }
+
+                    var result = processAllReplacements(paras, pairs, useSpecial, useWildcard);
+
+                    if (result.changes > 0) {
+                        var newXml = new XMLSerializer().serializeToString(xmlDoc);
+                        // 确保 XML 声明存在（Word 需要 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>）
+                        if (newXml.indexOf('<?xml') !== 0) {
+                            newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + newXml;
+                        }
+                        zip.file('word/document.xml', newXml);
+                        return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }).then(function(blob) {
+                            callback(fileName, true, result.stats, blob);
+                        });
+                    } else {
+                        callback(fileName, true, result.stats, null);
+                    }
+                });
+            }).catch(function(err) {
+                callback(fileName, false, 'JSZip处理失败: ' + ((err && err.message) || err), null);
+            });
+        } catch (e) {
+            callback(fileName, false, '异常: ' + (e.message || e), null);
+        }
+    }
+
+    function doBatchReplace() {
+        // 检查 JSZip 是否加载成功（Office iframe 可能阻止 CDN）
+        if (typeof JSZip === 'undefined') {
+            alert('JSZip 库未加载，批量替换功能不可用。请检查网络连接或刷新。');
+            document.getElementById('batchStatus').style.display = 'none';
+            return;
+        }
+        var names = Object.keys(batchFiles);
+        if (names.length === 0) { alert('请先选择 .docx 文件'); return; }
+        var srcLines = srcEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        var tgtLines = tgtEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        if (srcLines.length === 0) { alert('请在"待替换原词"中输入查找内容'); return; }
+        if (srcLines.length !== tgtLines.length) { alert('原词和目标词数量不匹配'); return; }
+        var useSpecial = specialCharCheckEl && specialCharCheckEl.checked;
+        var useWildcard = wildcardCheckEl && wildcardCheckEl.checked;
+        var pairs = [];
+        for (var i = 0; i < srcLines.length; i++) {
+            pairs.push({ src: srcLines[i].trim(), tgt: tgtLines[i].trim() });
+        }
+
+        var batchStatusEl = document.getElementById('batchStatus');
+        var resultAreaEl = document.getElementById('batchResultArea');
+        var downloadBtn = document.getElementById('batchDownloadBtn');
+        var overwriteBtn = document.getElementById('batchOverwriteBtn');
+        batchStatusEl.style.display = 'block';
+        batchStatusEl.textContent = '正在处理...';
+        batchResults = [];
+        downloadBtn.style.display = 'none';
+        overwriteBtn.style.display = 'none';
+        resultAreaEl.style.display = 'block';
+        resultAreaEl.innerHTML = '<span style="color:#888;">处理中...</span>';
+
+        var completedCount = 0;
+        var totalChanges = 0;
+        var totalNames = names.length;
+
+        function onFileDone(fName, ok, msg, blob) {
+            batchResults.push({ name: fName, ok: ok, msg: msg, blob: blob || null });
+            if (blob) { totalChanges += extractChangeCount(msg); }
+            completedCount++;
+            renderBatchResults();
+            batchStatusEl.textContent = '批处理: ' + completedCount + '/' + totalNames;
+            processNext(completedCount);
+        }
+
+        function processNext(idx) {
+            if (idx >= totalNames) {
+                var hasChanges = false;
+                for (var k = 0; k < batchResults.length; k++) {
+                    if (batchResults[k].blob) hasChanges = true;
+                }
+                if (hasChanges) {
+                    downloadBtn.style.display = 'inline-block';
+                    // 如果有可写句柄，同时显示"覆盖原文件"按钮
+                    if (Object.keys(batchHandles).length > 0) {
+                        document.getElementById('batchOverwriteBtn').style.display = 'inline-block';
+                    }
+                }
+                batchStatusEl.textContent = '处理完成: ' + totalNames + '个文件, 共修改 ' + totalChanges + ' 处';
+                renderBatchResults();
+                return;
+            }
+            var name = names[idx];
+            batchStatusEl.textContent = '正在处理 (' + (idx + 1) + '/' + totalNames + '): ' + name + '...';
+            var file = batchFiles[name];
+            if (!file) { onFileDone(name, false, '文件对象丢失', null); return; }
+            try {
+                readFileAsArrayBuffer(file, function(err, data) {
+                    if (err) { onFileDone(name, false, '文件读取失败', null); return; }
+                    if (!data || data.byteLength === 0) { onFileDone(name, false, '文件内容为空', null); return; }
+                    processSingleDocx(name, data, pairs, useSpecial, useWildcard, function(fName, success, msg, blob) {
+                        onFileDone(fName, success, msg, blob);
+                    });
+                });
+            } catch (e) {
+                onFileDone(name, false, '读取异常: ' + (e.message || e), null);
+            }
+        }
+
+        processNext(0);
+    }
+
+    function extractChangeCount(msg) {
+        var match = msg.match(/(\d+)处/);
+        return match ? parseInt(match[1], 10) : 0;
+    }
+
+    function renderBatchResults() {
+        var el = document.getElementById('batchResultArea');
+        var html = '';
+        for (var i = 0; i < batchResults.length; i++) {
+            var r = batchResults[i];
+            var icon = r.blob ? '&#10003;' : (r.ok ? '&#9866;' : '&#10007;');
+            var color = r.blob ? 'green' : (r.ok ? '#888' : 'red');
+            html += '<div style="padding:1px 0;font-size:12px;">';
+            html += '<span style="color:' + color + ';">' + icon + '</span> ';
+            html += escapeHtml(r.name) + ': ' + escapeHtml(r.msg);
+            html += '</div>';
+        }
+        if (html === '') html = '<span style="color:#888;">处理中...</span>';
+        el.innerHTML = html;
+    }
+
+    function doBatchDownload() {
+        if (batchResults.length === 0) return;
+        var changedFiles = [];
+        for (var i = 0; i < batchResults.length; i++) {
+            if (batchResults[i].blob) changedFiles.push(batchResults[i]);
+        }
+        if (changedFiles.length === 0) { alert('没有需要下载的文件（无修改）'); return; }
+        if (changedFiles.length === 1) {
+            downloadBlob(changedFiles[0].blob, changedFiles[0].name);
+            return;
+        }
+        var zip = new JSZip();
+        for (var i = 0; i < changedFiles.length; i++) {
+            zip.file(changedFiles[i].name, changedFiles[i].blob);
+        }
+        zip.generateAsync({ type: 'blob' }).then(function(zipBlob) {
+            downloadBlob(zipBlob, '批量替换结果.zip');
+        });
+    }
+
+    function downloadBlob(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // ========== 自定义确认对话框（替代 confirm，避免 Office iframe 限制） ==========
+    function showConfirmDialog(message, onOk, onCancel) {
+        var overlay = document.getElementById('confirmOverlay');
+        var body = document.getElementById('confirmBody');
+        var okBtn = document.getElementById('confirmOk');
+        var cancelBtn = document.getElementById('confirmCancel');
+
+        if (!overlay || !body) {
+            // 回退到原生 confirm
+            if (confirm(message)) { if (onOk) onOk(); }
+            else { if (onCancel) onCancel(); }
+            return;
+        }
+
+        body.textContent = message;
+        overlay.style.display = 'flex';
+
+        okBtn.onclick = function() {
+            overlay.style.display = 'none';
+            if (onOk) onOk();
+        };
+        cancelBtn.onclick = function() {
+            overlay.style.display = 'none';
+            if (onCancel) onCancel();
+        };
+    }
+
+    // ========== 覆盖原文件 ==========
+    function doBatchOverwrite() {
+        if (batchResults.length === 0) return;
+        var changedFiles = [];
+        for (var i = 0; i < batchResults.length; i++) {
+            if (batchResults[i].blob) changedFiles.push(batchResults[i]);
+        }
+        if (changedFiles.length === 0) { alert('没有文件被修改'); return; }
+
+        var hasHandles = false;
+        for (var j = 0; j < changedFiles.length; j++) {
+            if (batchHandles[changedFiles[j].name]) { hasHandles = true; break; }
+        }
+
+        // 构建文件清单
+        var fileListText = '';
+        for (var k = 0; k < changedFiles.length; k++) {
+            fileListText += '\u2022 ' + changedFiles[k].name + '\n';
+        }
+
+        // 弹出确认对话框
+        showConfirmDialog(
+            '即将覆盖以下 ' + changedFiles.length + ' 个文件：\n\n' + fileListText + '\n此操作不可撤销，是否确认全部覆盖？',
+            function() {
+                // 确认覆盖
+                if (!hasHandles) {
+                    saveWithPickerOneByOne(changedFiles, function(remaining) {
+                        if (remaining.length > 0) doBatchDownload();
+                    });
+                    return;
+                }
+
+                var total = changedFiles.length;
+                var done = 0;
+                var statusEl = document.getElementById('batchStatus');
+                statusEl.style.display = 'block';
+                statusEl.textContent = '正在写入文件... 0/' + total;
+
+                function writeNext(index) {
+                    if (index >= changedFiles.length) {
+                        statusEl.textContent = '已完成覆盖保存 ' + total + ' 个文件';
+                        return;
+                    }
+                    var item = changedFiles[index];
+                    var handle = batchHandles[item.name];
+                    if (!handle) {
+                        statusEl.textContent = '跳过 ' + item.name + '（无写入权限）';
+                        done++;
+                        writeNext(index + 1);
+                        return;
+                    }
+                    var writable = null;
+                    handle.createWritable().then(function(w) {
+                        writable = w;
+                        return w.write(item.blob);
+                    }).then(function() {
+                        return writable.close();
+                    }).then(function() {
+                        done++;
+                        statusEl.textContent = '已覆盖保存 ' + done + '/' + total + ': ' + item.name;
+                        writeNext(index + 1);
+                    }).catch(function(e) {
+                        statusEl.textContent = '写入失败: ' + item.name + ' - ' + (e && e.message || e);
+                        writeNext(index + 1);
+                    });
+                }
+                writeNext(0);
+            },
+            function() {
+                // 取消
+                document.getElementById('batchStatus').textContent = '已取消覆盖保存';
+            }
+        );
+    }
+
+    // 回退：逐个 showSaveFilePicker
+    function saveWithPickerOneByOne(fileList, onAllDone) {
+        var remaining = fileList.slice();
+        if (!window.showSaveFilePicker) { onAllDone(remaining); return; }
+
+        function pickNext() {
+            if (remaining.length === 0) { onAllDone([]); return; }
+            var item = remaining.shift();
+            var writable = null;
+            window.showSaveFilePicker({ suggestedName: item.name }).then(function(handle) {
+                return handle.createWritable();
+            }).then(function(w) {
+                writable = w;
+                return w.write(item.blob);
+            }).then(function() {
+                return writable.close();
+            }).then(function() {
+                document.getElementById('batchStatus').textContent = '已保存: ' + item.name;
+                pickNext();
+            }).catch(function(e) {
+                pickNext();
+            });
+        }
+        pickNext();
+    }
+
+    // ========== 原有功能 ==========
+
+    function refreshWordTags() {
+        var lines = srcEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        wordTagsEl.innerHTML = '';
+        for (var i = 0; i < lines.length; i++) {
+            var word = lines[i].trim();
+            var color = getColor(i);
+            var tag = document.createElement('span');
+            tag.className = 'word-tag';
+            tag.textContent = word;
+            tag.style.backgroundColor = color;
+            tag.style.borderColor = color;
+            tag.style.color = '#fff';
+            tag.setAttribute('data-word', word);
+            tag.setAttribute('data-index', i);
+            tag.onclick = (function(w, el, idx) {
+                return function() { doFindWord(w, el, idx); };
+            })(word, tag, i);
+            wordTagsEl.appendChild(tag);
+        }
+    }
+
+    function doFindWord(word, tagEl, colorIndex) {
+        statusEl.textContent = '正在查找 "' + word + '"...';
+        var allTags = wordTagsEl.getElementsByTagName('span');
+        for (var k = 0; k < allTags.length; k++) { allTags[k].className = 'word-tag'; }
+        if (tagEl) tagEl.className = 'word-tag active';
+        var doHighlightColor = document.getElementById('highlightCheck').checked;
+        var hlColor = doHighlightColor ? getColor(colorIndex) : null;
+        Word.run(function(context) {
+            var body = context.document.body;
+            var sr = getSearchFn(word);
+            var results = body.search(sr.text, { matchCase: false, matchWholeWord: false, matchWildcards: sr.wildcard });
+            results.load('items');
+            return context.sync().then(function() {
+                var count = results.items.length;
+                if (count > 0) {
+                    if (doHighlightColor) {
+                        for (var j = 0; j < count; j++) { results.items[j].font.highlightColor = hlColor; }
+                    }
+                    results.items[0].select();
+                    return context.sync().then(function() {
+                        navState.word = word;
+                        navState.colorIndex = colorIndex;
+                        navState.currentPos = 0;
+                        navState.totalCount = count;
+                        updateNavUI();
+                        statusEl.textContent = '"' + word + '" 找到 ' + count + ' 处，已定位到第 1 处';
+                    });
+                } else {
+                    navState.word = '';
+                    navState.totalCount = 0;
+                    updateNavUI();
+                    statusEl.textContent = '"' + word + '" 未找到';
+                    if (tagEl) tagEl.className = 'word-tag';
+                }
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '查找失败: ' + error.message;
+            if (tagEl) tagEl.className = 'word-tag';
+        });
+    }
+
+    function updateNavUI() {
+        var navBtns = document.getElementById('navBtns');
+        var navInfo = document.getElementById('navInfo');
+        if (navState.totalCount > 0) {
+            navBtns.style.display = 'block';
+            navInfo.textContent = (navState.currentPos + 1) + ' / ' + navState.totalCount;
+        } else {
+            navBtns.style.display = 'none';
+            navInfo.textContent = '';
+        }
+    }
+
+    function doNavigatePrev() {
+        if (navState.totalCount === 0) return;
+        navState.currentPos--;
+        if (navState.currentPos < 0) navState.currentPos = navState.totalCount - 1;
+        navigateToPos();
+    }
+
+    function doNavigateNext() {
+        if (navState.totalCount === 0) return;
+        navState.currentPos++;
+        if (navState.currentPos >= navState.totalCount) navState.currentPos = 0;
+        navigateToPos();
+    }
+
+    function navigateToPos() {
+        var word = navState.word;
+        var pos = navState.currentPos;
+        Word.run(function(context) {
+            var body = context.document.body;
+            var sr = getSearchFn(word);
+            var results = body.search(sr.text, { matchCase: false, matchWholeWord: false, matchWildcards: sr.wildcard });
+            results.load('items');
+            return context.sync().then(function() {
+                if (results.items.length > pos) {
+                    results.items[pos].select();
+                    return context.sync().then(function() {
+                        updateNavUI();
+                        statusEl.textContent = '"' + word + '" ' + (pos + 1) + '/' + navState.totalCount;
+                    });
+                }
+            });
+        }).catch(function(error) { statusEl.textContent = '导航失败: ' + error.message; });
+    }
+
+    function doClearHighlight() {
+        statusEl.textContent = '正在清除高亮...';
+        Word.run(function(context) {
+            var body = context.document.body;
+            var range = body.getRange();
+            range.font.highlightColor = null;
+            return context.sync().then(function() { statusEl.textContent = '已清除所有高亮'; });
+        }).catch(function(error) { statusEl.textContent = '清除失败: ' + error.message; });
+    }
+
+    function doClear() {
+        srcEl.value = '';
+        tgtEl.value = '';
+        localStorage.removeItem('word_addon_source');
+        localStorage.removeItem('word_addon_target');
+        resultArea.style.display = 'none';
+        resultContent.innerHTML = '';
+        wordTagsEl.innerHTML = '';
+        statusEl.textContent = '已清空';
+    }
+
+    function showResults(results) {
+        resultArea.style.display = 'block';
+        resultContent.innerHTML = '';
+        for (var i = 0; i < results.length; i++) {
+            var r = results[i];
+            var color = r.ok ? 'green' : 'red';
+            var icon = r.ok ? '&#10003;' : '&#10007;';
+            var dot = r.color ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + r.color + ';margin-right:4px;vertical-align:middle;"></span>' : '';
+            resultContent.innerHTML += '<div style="font-size:12px;padding:2px 0;">' + dot + '<span style="color:' + color + ';">' + icon + '</span> ' + r.msg + '</div>';
+        }
+    }
+
+    function doHighlight() {
+        var lines = srcEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        if (lines.length === 0) { statusEl.textContent = '请输入原词'; return; }
+        statusEl.textContent = '正在扫描...';
+        resultArea.style.display = 'none';
+        var doHighlightColor = document.getElementById('highlightCheck').checked;
+
+        Word.run(function(context) {
+            var body = context.document.body;
+            var results = [];
+            var searches = [];
+
+            for (var i = 0; i < lines.length; i++) {
+                var word = lines[i].trim();
+                if (!word) continue;
+                var sr = getSearchFn(word);
+                var s = body.search(sr.text, { matchCase: false, matchWholeWord: false, matchWildcards: sr.wildcard });
+                s.load('items');
+                searches.push({ original: word, search: s, color: doHighlightColor ? getColor(i) : null });
+            }
+
+            return context.sync().then(function() {
+                for (var i = 0; i < searches.length; i++) {
+                    var count = searches[i].search.items.length;
+                    if (count > 0) {
+                        if (doHighlightColor) {
+                            for (var j = 0; j < count; j++) {
+                                searches[i].search.items[j].font.highlightColor = searches[i].color;
+                            }
+                            results.push({ ok: true, msg: '"' + searches[i].original + '" 找到 ' + count + ' 处', color: searches[i].color });
+                        } else {
+                            results.push({ ok: true, msg: '"' + searches[i].original + '" 找到 ' + count + ' 处' });
+                        }
+                    } else {
+                        results.push({ ok: false, msg: '"' + searches[i].original + '" 未找到' });
+                    }
+                }
+                return context.sync().then(function() {
+                    statusEl.textContent = doHighlightColor ? '高亮完成（不同关键词不同颜色）' : '统计完成（未高亮）';
+                    showResults(results);
+                });
+            });
+        }).catch(function(error) { statusEl.textContent = '高亮失败: ' + error.message; });
+    }
+
+    function doReplace() {
+        var srcLines = srcEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        var tgtLines = tgtEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        if (srcLines.length === 0) { statusEl.textContent = '请输入原词'; return; }
+        if (tgtLines.length === 0) { statusEl.textContent = '请输入替换词'; return; }
+        if (srcLines.length !== tgtLines.length) { statusEl.textContent = '数量不匹配'; return; }
+        statusEl.textContent = '正在替换...';
+        resultArea.style.display = 'none';
+
+        Word.run(function(context) {
+            var body = context.document.body;
+            var results = [];
+            var searches = [];
+
+            for (var i = 0; i < srcLines.length; i++) {
+                var word = srcLines[i].trim();
+                if (!word) { searches.push(null); continue; }
+                var sr = getSearchFn(word);
+                var s = body.search(sr.text, { matchCase: false, matchWholeWord: false, matchWildcards: sr.wildcard });
+                s.load('items');
+                searches.push({ source: word, target: tgtLines[i].trim(), search: s });
+            }
+
+            return context.sync().then(function() {
+                for (var i = 0; i < searches.length; i++) {
+                    if (!searches[i]) continue;
+                    var count = searches[i].search.items.length;
+                    if (count > 0) {
+                        // 从后往前替换，避免索引偏移
+                        for (var j = count - 1; j >= 0; j--) {
+                            replaceRangeWithSegments(searches[i].search.items[j], searches[i].target);
+                        }
+                        results.push({ ok: true, msg: '"' + searches[i].source + '" &#8594; "' + searches[i].target + '" (' + count + '处)' });
+                    } else {
+                        results.push({ ok: false, msg: '"' + searches[i].source + '" 未找到' });
+                    }
+                }
+                return context.sync().then(function() {
+                    var ok = 0;
+                    for (var i = 0; i < results.length; i++) { if (results[i].ok) ok++; }
+                    statusEl.textContent = '替换完成 (' + ok + '/' + results.length + ')';
+                    showResults(results);
+                });
+            });
+        }).catch(function(error) { statusEl.textContent = '替换失败: ' + error.message; });
+    }
+
+    Office.onReady(function(info) {
+        statusEl = document.getElementById('statusText');
+
+        srcEl = document.getElementById('sourceWords');
+        tgtEl = document.getElementById('targetWords');
+        resultArea = document.getElementById('resultArea');
+        resultContent = document.getElementById('resultContent');
+        wordTagsEl = document.getElementById('wordTags');
+        wildcardCheckEl = document.getElementById('wildcardCheck');
+        specialCharCheckEl = document.getElementById('specialCharCheck');
+
+        document.getElementById('highlightBtn').onclick = doHighlight;
+        document.getElementById('replaceBtn').onclick = doReplace;
+        document.getElementById('clearHLBtn').onclick = doClearHighlight;
+        document.getElementById('clearBtn').onclick = doClear;
+        document.getElementById('prevBtn').onclick = doNavigatePrev;
+        document.getElementById('nextBtn').onclick = doNavigateNext;
+
+        document.getElementById('batchSelectBtn').onclick = doBatchSelect;
+        document.getElementById('batchFileInput').onchange = onBatchFilesChanged;
+        document.getElementById('batchReplaceBtn').onclick = doBatchReplace;
+        document.getElementById('batchOverwriteBtn').onclick = doBatchOverwrite;
+        document.getElementById('batchDownloadBtn').onclick = doBatchDownload;
+
+        var saveTimer;
+        function autoSave() {
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(function() {
+                localStorage.setItem('word_addon_source', srcEl.value);
+                localStorage.setItem('word_addon_target', tgtEl.value);
+                refreshWordTags();
+            }, 500);
+        }
+        srcEl.oninput = autoSave;
+        tgtEl.oninput = autoSave;
+
+        var saved1 = localStorage.getItem('word_addon_source');
+        var saved2 = localStorage.getItem('word_addon_target');
+        if (saved1) srcEl.value = saved1;
+        if (saved2) tgtEl.value = saved2;
+        refreshWordTags();
+
+        if (info.host === Office.HostType.Word) {
+            statusEl.textContent = '就绪';
+        } else {
+            statusEl.textContent = '请在 Word 中使用';
+        }
+    });
+    </script>
+</body>
+</html>
