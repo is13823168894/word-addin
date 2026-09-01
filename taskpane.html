@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>词汇增强助手</title>
+</head>
+<body>
+    <p><b>待替换原词</b></p>
+    <textarea id="sourceWords" rows="6" style="width:100%;" placeholder="例如：我觉得&#10;核心指标"></textarea>
+    <div id="wordTags" style="margin-top:3px;"></div>
+    <div id="navBtns" style="margin-top:3px;display:none;">
+        <button id="prevBtn">&#9650; 上一个</button>
+        <button id="nextBtn">&#9660; 下一个</button>
+        <span id="navInfo" style="font-size:12px;color:#666;margin-left:6px;"></span>
+    </div>
+
+    <p><b>目标替换词</b>（对应行）</p>
+    <textarea id="targetWords" rows="6" style="width:100%;" placeholder="例如：本人认为&#10;KPI"></textarea>
+
+    <br><br>
+    <button id="highlightBtn">统计并高亮</button>
+    <button id="replaceBtn">执行替换</button>
+    <button id="clearHLBtn">清除高亮</button>
+    <button id="clearBtn">清空全部</button>
+
+    <div id="resultArea" style="display:none;margin-top:3px;padding:10px;background:#f8f8f8;border-left:4px solid #2b579a;">
+        <b>操作结果：</b>
+        <div id="resultContent"></div>
+    </div>
+
+    <p id="statusText" style="color:#2b579a;font-size:12px;margin-top:3px;">就绪</p>
+
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 15px; }
+        h1 { font-size: 18px; color: #2b579a; margin-bottom: 5px; }
+        button { padding: 8px 18px; margin-right: 8px; cursor: pointer; border-radius: 4px; border: none; font-size: 13px; }
+        #highlightBtn { background: white; color: #2b579a; border: 2px solid #2b579a; }
+        #replaceBtn { background: #2b579a; color: white; }
+        #clearBtn { background: white; color: #d32f2f; border: 1px solid #d32f2f; }
+        #clearHLBtn { background: white; color: #e65100; border: 1px solid #e65100; }
+        #prevBtn, #nextBtn { padding: 4px 12px; margin-right: 4px; cursor: pointer; border-radius: 4px; border: 1px solid #2b579a; background: white; color: #2b579a; font-size: 12px; }
+        #prevBtn:hover, #nextBtn:hover { background: #2b579a; color: white; }
+        textarea { font-family: Consolas, monospace; font-size: 13px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .word-tag { display: inline-block; padding: 3px 10px; margin: 3px 4px 3px 0; border-radius: 12px; font-size: 12px; cursor: pointer; border: 1px solid #b0c4de; color: #fff; }
+        .word-tag:hover { opacity: 0.8; }
+        .word-tag.active { outline: 2px solid #333; outline-offset: 1px; }
+    </style>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    var srcEl, tgtEl, statusEl, resultArea, resultContent, wordTagsEl;
+
+    var navState = {
+        word: '',
+        colorIndex: 0,
+        currentPos: 0,
+        totalCount: 0
+    };
+
+    var HIGHLIGHT_COLORS = [
+        '#FFFF00', '#00FFFF', '#FF00FF', '#00FF00',
+        '#FF6600', '#9933FF', '#FF0000', '#00CCFF',
+        '#FFCC00', '#66FF66', '#FF99CC', '#CC99FF'
+    ];
+
+    function getColor(index) {
+        return HIGHLIGHT_COLORS[index % HIGHLIGHT_COLORS.length];
+    }
+
+    Office.onReady(function(info) {
+        srcEl = document.getElementById('sourceWords');
+        tgtEl = document.getElementById('targetWords');
+        statusEl = document.getElementById('statusText');
+        resultArea = document.getElementById('resultArea');
+        resultContent = document.getElementById('resultContent');
+        wordTagsEl = document.getElementById('wordTags');
+
+        document.getElementById('highlightBtn').onclick = doHighlight;
+        document.getElementById('replaceBtn').onclick = doReplace;
+        document.getElementById('clearHLBtn').onclick = doClearHighlight;
+        document.getElementById('clearBtn').onclick = doClear;
+        document.getElementById('prevBtn').onclick = doNavigatePrev;
+        document.getElementById('nextBtn').onclick = doNavigateNext;
+
+        var saveTimer;
+        function autoSave() {
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(function() {
+                localStorage.setItem('word_addon_source', srcEl.value);
+                localStorage.setItem('word_addon_target', tgtEl.value);
+                refreshWordTags();
+            }, 500);
+        }
+        srcEl.oninput = autoSave;
+        tgtEl.oninput = autoSave;
+
+        var saved1 = localStorage.getItem('word_addon_source');
+        var saved2 = localStorage.getItem('word_addon_target');
+        if (saved1) srcEl.value = saved1;
+        if (saved2) tgtEl.value = saved2;
+
+        refreshWordTags();
+
+        if (info.host === Office.HostType.Word) {
+            statusEl.textContent = '就绪';
+        } else {
+            statusEl.textContent = '请在 Word 中使用';
+        }
+    });
+
+    function refreshWordTags() {
+        var lines = srcEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        wordTagsEl.innerHTML = '';
+        for (var i = 0; i < lines.length; i++) {
+            var word = lines[i].trim();
+            var color = getColor(i);
+            var tag = document.createElement('span');
+            tag.className = 'word-tag';
+            tag.textContent = word;
+            tag.style.backgroundColor = color;
+            tag.style.borderColor = color;
+            tag.style.color = '#fff';
+            tag.setAttribute('data-word', word);
+            tag.setAttribute('data-index', i);
+            tag.onclick = (function(w, el, idx) {
+                return function() { doFindWord(w, el, idx); };
+            })(word, tag, i);
+            wordTagsEl.appendChild(tag);
+        }
+    }
+
+    function doFindWord(word, tagEl, colorIndex) {
+        statusEl.textContent = '正在查找 "' + word + '"...';
+        var allTags = wordTagsEl.getElementsByTagName('span');
+        for (var k = 0; k < allTags.length; k++) { allTags[k].className = 'word-tag'; }
+        if (tagEl) tagEl.className = 'word-tag active';
+        var hlColor = getColor(colorIndex);
+        Word.run(function(context) {
+            var results = context.document.body.search(word, { matchCase: false, matchWholeWord: false });
+            results.load('items');
+            return context.sync().then(function() {
+                var count = results.items.length;
+                if (count > 0) {
+                    for (var j = 0; j < count; j++) {
+                        results.items[j].font.highlightColor = hlColor;
+                    }
+                    results.items[0].select();
+                    return context.sync().then(function() {
+                        navState.word = word;
+                        navState.colorIndex = colorIndex;
+                        navState.currentPos = 0;
+                        navState.totalCount = count;
+                        updateNavUI();
+                        statusEl.textContent = '"' + word + '" 找到 ' + count + ' 处，已定位到第 1 处';
+                    });
+                } else {
+                    navState.word = '';
+                    navState.totalCount = 0;
+                    updateNavUI();
+                    statusEl.textContent = '"' + word + '" 未找到';
+                    if (tagEl) tagEl.className = 'word-tag';
+                }
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '查找失败: ' + error.message;
+            if (tagEl) tagEl.className = 'word-tag';
+        });
+    }
+
+    function updateNavUI() {
+        var navBtns = document.getElementById('navBtns');
+        var navInfo = document.getElementById('navInfo');
+        if (navState.totalCount > 0) {
+            navBtns.style.display = 'block';
+            navInfo.textContent = (navState.currentPos + 1) + ' / ' + navState.totalCount;
+        } else {
+            navBtns.style.display = 'none';
+            navInfo.textContent = '';
+        }
+    }
+
+    function doNavigatePrev() {
+        if (navState.totalCount === 0) return;
+        navState.currentPos--;
+        if (navState.currentPos < 0) navState.currentPos = navState.totalCount - 1;
+        navigateToPos();
+    }
+
+    function doNavigateNext() {
+        if (navState.totalCount === 0) return;
+        navState.currentPos++;
+        if (navState.currentPos >= navState.totalCount) navState.currentPos = 0;
+        navigateToPos();
+    }
+
+    function navigateToPos() {
+        var word = navState.word;
+        var hlColor = getColor(navState.colorIndex);
+        var pos = navState.currentPos;
+        Word.run(function(context) {
+            var results = context.document.body.search(word, { matchCase: false, matchWholeWord: false });
+            results.load('items');
+            return context.sync().then(function() {
+                if (results.items.length > pos) {
+                    results.items[pos].select();
+                    return context.sync().then(function() {
+                        updateNavUI();
+                        statusEl.textContent = '"' + word + '" ' + (pos + 1) + '/' + navState.totalCount;
+                    });
+                }
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '导航失败: ' + error.message;
+        });
+    }
+
+    function doClearHighlight() {
+        statusEl.textContent = '正在清除高亮...';
+        Word.run(function(context) {
+            var body = context.document.body;
+            var range = body.getRange();
+            range.font.highlightColor = null;
+            return context.sync().then(function() {
+                statusEl.textContent = '已清除所有高亮';
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '清除失败: ' + error.message;
+        });
+    }
+
+    function doClear() {
+        srcEl.value = '';
+        tgtEl.value = '';
+        localStorage.removeItem('word_addon_source');
+        localStorage.removeItem('word_addon_target');
+        resultArea.style.display = 'none';
+        resultContent.innerHTML = '';
+        wordTagsEl.innerHTML = '';
+        statusEl.textContent = '已清空';
+    }
+
+    function showResults(results) {
+        resultArea.style.display = 'block';
+        resultContent.innerHTML = '';
+        for (var i = 0; i < results.length; i++) {
+            var r = results[i];
+            var color = r.ok ? 'green' : 'red';
+            var icon = r.ok ? '&#10003;' : '&#10007;';
+            var dot = r.color ? '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + r.color + ';margin-right:4px;vertical-align:middle;"></span>' : '';
+            resultContent.innerHTML += '<div style="font-size:12px;padding:2px 0;">' + dot + '<span style="color:' + color + ';">' + icon + '</span> ' + r.msg + '</div>';
+        }
+    }
+
+    function doHighlight() {
+        var lines = srcEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        if (lines.length === 0) { statusEl.textContent = '请输入原词'; return; }
+        statusEl.textContent = '正在扫描...';
+        resultArea.style.display = 'none';
+        Word.run(function(context) {
+            var body = context.document.body;
+            var results = [];
+            var searches = [];
+            for (var i = 0; i < lines.length; i++) {
+                var word = lines[i].trim();
+                if (!word) continue;
+                var s = body.search(word, { matchCase: false, matchWholeWord: false });
+                s.load('items');
+                searches.push({ word: word, search: s, colorIndex: i, color: getColor(i) });
+            }
+            return context.sync().then(function() {
+                for (var i = 0; i < searches.length; i++) {
+                    var count = searches[i].search.items.length;
+                    if (count > 0) {
+                        for (var j = 0; j < count; j++) {
+                            searches[i].search.items[j].font.highlightColor = searches[i].color;
+                        }
+                        results.push({ ok: true, msg: '"' + searches[i].word + '" 找到 ' + count + ' 处', color: searches[i].color });
+                    } else {
+                        results.push({ ok: false, msg: '"' + searches[i].word + '" 未找到', color: searches[i].color });
+                    }
+                }
+                return context.sync().then(function() {
+                    statusEl.textContent = '高亮完成（不同关键词不同颜色）';
+                    showResults(results);
+                });
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '高亮失败: ' + error.message;
+        });
+    }
+
+    function doReplace() {
+        var srcLines = srcEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        var tgtLines = tgtEl.value.split('\n').filter(function(l) { return l.trim() !== ''; });
+        if (srcLines.length === 0) { statusEl.textContent = '请输入原词'; return; }
+        if (tgtLines.length === 0) { statusEl.textContent = '请输入替换词'; return; }
+        if (srcLines.length !== tgtLines.length) { statusEl.textContent = '数量不匹配'; return; }
+        statusEl.textContent = '正在替换...';
+        resultArea.style.display = 'none';
+        Word.run(function(context) {
+            var body = context.document.body;
+            var results = [];
+            var searches = [];
+            for (var i = 0; i < srcLines.length; i++) {
+                var word = srcLines[i].trim();
+                if (!word) { searches.push(null); continue; }
+                var s = body.search(word, { matchCase: false, matchWholeWord: false });
+                s.load('items');
+                searches.push({ source: word, target: tgtLines[i].trim(), search: s });
+            }
+            return context.sync().then(function() {
+                for (var i = 0; i < searches.length; i++) {
+                    if (!searches[i]) continue;
+                    var count = searches[i].search.items.length;
+                    if (count > 0) {
+                        for (var j = count - 1; j >= 0; j--) {
+                            searches[i].search.items[j].insertText(searches[i].target, Word.InsertLocation.replace);
+                        }
+                        results.push({ ok: true, msg: '"' + searches[i].source + '" &#8594; "' + searches[i].target + '" (' + count + '处)' });
+                    } else {
+                        results.push({ ok: false, msg: '"' + searches[i].source + '" 未找到' });
+                    }
+                }
+                return context.sync().then(function() {
+                    var ok = 0;
+                    for (var i = 0; i < results.length; i++) { if (results[i].ok) ok++; }
+                    statusEl.textContent = '替换完成 (' + ok + '/' + results.length + ')';
+                    showResults(results);
+                });
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '替换失败: ' + error.message;
+        });
+    }
+    </script>
+</body>
+</html>
