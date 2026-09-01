@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="TaskPaneApp">
+  <Id>A1B2C3D4-E5F6-7A8B-9C0D-1E2F3A4B5C6D</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Word转Markdown</ProviderName>
+  <DefaultLocale>zh-CN</DefaultLocale>
+  <DisplayName DefaultValue="Word转Markdown"/>
+  <Description DefaultValue="将Word文档内容转换为Markdown格式"/>
+  <IconUrl DefaultValue="http://localhost/word-addin/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="http://localhost/word-addin/icon-64.png"/>
+  <SupportUrl DefaultValue="http://localhost/word-addin/tomarkdown-tool"/>
+  <AppDomains>
+    <AppDomain>http://localhost</AppDomain>
+  </AppDomains>
+  <Hosts>
+    <Host Name="Document"/>
+  </Hosts>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="http://localhost/word-addin/tomarkdown-tool/index.html"/>
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Document">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title"/>
+            <Description resid="GetStarted.Description"/>
+            <LearnMoreUrl resid="GetStarted.LearnMoreUrl"/>
+          </GetStarted>
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="CommandsGroup">
+                <Label resid="CommandsGroup.Label"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16"/>
+                  <bt:Image size="32" resid="Icon.32x32"/>
+                  <bt:Image size="80" resid="Icon.80x80"/>
+                </Icon>
+                <Control xsi:type="Button" id="TaskpaneButton">
+                  <Label resid="TaskpaneButton.Label"/>
+                  <Supertip>
+                    <Title resid="TaskpaneButton.SupertipTitle"/>
+                    <Description resid="TaskpaneButton.SupertipText"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonId1</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="http://localhost/word-addin/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="http://localhost/word-addin/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="http://localhost/word-addin/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="http://go.microsoft.com/fwlink/?LinkId=276812"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="http://localhost/word-addin/tomarkdown-tool/index.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GetStarted.Title" DefaultValue="Word转Markdown"/>
+        <bt:String id="CommandsGroup.Label" DefaultValue="Markdown工具"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="转为Markdown"/>
+        <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="Word转Markdown"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="GetStarted.Description" DefaultValue="将Word文档内容转换为Markdown格式。请在HOME选项卡中点击「转为Markdown」按钮开始使用。"/>
+        <bt:String id="TaskpaneButton.SupertipText" DefaultValue="打开Word转Markdown工具面板"/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

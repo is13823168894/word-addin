@@ -1,0 +1,3535 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>段落对比工具</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            height: 100%;
+            margin: 0; padding: 0;
+        }
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            padding: 10px 14px 6px 14px;
+            background: #f5f5f5;
+            color: #333;
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        h3 { font-size: 16px; margin-bottom: 2px; color: #2b579a; }
+        .subtitle { font-size: 11px; color: #888; margin-bottom: 6px; }
+
+        /* 捕获区 */
+        .section {
+            background: #fff; border: 1px solid #e0e0e0;
+            border-radius: 6px; padding: 6px 10px; margin-bottom: 6px;
+            position: relative;
+            z-index: 1;
+        }
+        .section-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 2px;
+        }
+        .section-label { font-weight: bold; font-size: 12px; color: #555; }
+        .badge {
+            display: inline-block; width: 18px; height: 18px;
+            line-height: 18px; text-align: center; border-radius: 50%;
+            color: #fff; font-size: 10px; margin-right: 3px; vertical-align: middle;
+        }
+        .badge-a { background: #d83b01; }
+        .badge-b { background: #107c10; }
+        .captured { color: #107c10; font-size: 11px; font-weight: bold; }
+        .not-captured { color: #999; font-size: 11px; }
+        .preview-box {
+            display: block; width: 100%;
+            background: transparent; border: 1px solid #e8e8e8;
+            border-radius: 4px; padding: 6px 8px; min-height: 200px;
+            height: 200px;
+            max-height: 500px; overflow-y: auto; font-size: 12px;
+            line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: #333;
+            caret-color: #333;
+            font-family: inherit; resize: vertical;
+            position: relative; z-index: 2;
+            /* 关键：无论滚动条是否出现，都为滚动条预留固定宽度，
+               保证 textarea 和镜像层内容宽度 100% 对齐 → 换行才不会错位 → 视觉上就不会"断开" */
+            scrollbar-gutter: stable;
+        }
+        .preview-box:focus { outline: 2px solid #2b579a; border-color: #2b579a; }
+        .preview-box::placeholder { color: #ccc; font-style: italic; }
+        /* 选区镜像层容器 */
+        .preview-wrap { position: relative; width: 100%; overflow: hidden; }
+        .preview-mirror {
+            position: absolute; top: 0; left: 0; right: 0;
+            margin: 0;
+            padding: 6px 8px;
+            font-size: 12px; line-height: 1.5;
+            white-space: pre-wrap; word-break: break-all;
+            font-family: inherit;
+            /* ═══════════════════════════════════════════════════
+               致命修复 1：mirror 永远显示黑字，不再依赖 .is-same 才上色。
+               之前默认 color:transparent → 没加 is-same 时整个 mirror 的
+               字全是透明的，我再怎么给 span 写红字也看不到。
+               ═══════════════════════════════════════════════════ */
+            background: transparent;
+            color: #1a1a1a;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            box-sizing: border-box;
+            pointer-events: none;
+            /* ═══════════════════════════════════════════════════
+               致命修复 2：z-index 提到 textarea 之上。
+               之前 mirror z=1, textarea z=2 → textarea 把 mirror 的红色
+               span 全遮住了，所以任我怎么改 CSS，你都看不到。 */
+            z-index: 3;
+            text-shadow: none;
+            -webkit-text-stroke-width: 0;
+            /* 换行对齐：内容宽度 / overflow / 滚动槽位严格一致 */
+            overflow-y: auto;
+            overflow-x: hidden;
+            scrollbar-gutter: stable;
+            scrollbar-width: none;
+        }
+        .preview-mirror::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+        /* ═══════════════════════════════════════════════════
+           致命修复 3：textarea 永久透明字（保留光标/滚动/接收输入）。
+           现在 mirror 在最上面(z=3)真显示正文，textarea 在下面只负责
+           交互/光标/滚动。这和"is-same 模式"的做法一致，但范围扩大到
+           所有 preview-wrap，避免"非 is-same 时 mirror 在底下透明看不见"。
+           ═══════════════════════════════════════════════════ */
+        .preview-wrap .preview-box {
+            color: transparent !important;
+            text-shadow: none !important;
+            -webkit-text-stroke-width: 0;
+            background: #fff;
+            caret-color: #333 !important;
+        }
+
+        /*
+         * 定位命中 → 红色粗体字 + 黄色底色：
+         *   · 只给 .preview-mirror .preview-sel 最具体的选择器
+         *   · background #fff59d 黄底 + 红色粗字 + 下边 2px 红虚线
+         *   · 三重保险，绝对不会再"没有任何效果"。
+         */
+        .preview-mirror .preview-sel {
+            color: #e20000 !important;
+            font-weight: 700 !important;
+            background: #fff59d !important;
+            border-bottom: 2px solid #ff2222 !important;
+            border-radius: 2px !important;
+            box-shadow: inset 0 0 0 1px #ff9a9a;
+            padding: 0 1px;
+            text-shadow: none !important;
+        }
+
+        /*
+         * textarea 原生选中做成视觉透明：
+         *   定位/滚动 仍然需要 setSelectionRange（行为层保留），
+         *   但上面的 mirror 层已经显示黑字/红字了，下面 textarea 的 ::selection
+         *   不能再画出系统蓝，否则就从 mirror 底下透出两层色块。
+         */
+        .preview-wrap .preview-box::selection {
+            background: transparent !important;
+            color: inherit !important;
+        }
+        .preview-wrap .preview-box::-moz-selection {
+            background: transparent !important;
+            color: inherit !important;
+        }
+
+        /* 折叠按钮 */
+        .collapse-btn {
+            background: none; border: none; cursor: pointer;
+            font-size: 16px; line-height: 1; padding: 0 4px; color: #888;
+            transition: transform 0.2s; user-select: none;
+        }
+        .collapse-btn:hover { color: #333; }
+        .collapse-btn.collapsed { transform: rotate(-90deg); }
+
+        /* 面板头"定位选区"小按钮：与 collapse-btn 同高、紧凑，保持整行不乱 */
+        .hdr-locate-btn {
+            height: 20px;
+            padding: 0 6px;
+            line-height: 18px;
+            font-size: 11px;
+            border-radius: 3px;
+            border: 1px solid #c5d2e7;
+            background: #f5f8ff;
+            color: #2b579a;
+            cursor: pointer;
+            user-select: none;
+            margin: 0;
+            white-space: nowrap;
+        }
+        .hdr-locate-btn:hover { background: #e8efff; border-color: #2b579a; }
+
+        /* 折叠内容容器 */
+        .section-body {
+            overflow: hidden;
+            max-height: 500px;
+            transition: max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease, opacity 0.2s ease;
+            opacity: 1;
+        }
+        .section-body.collapsed {
+            max-height: 0;
+            padding-top: 0; padding-bottom: 0;
+            margin-top: 0; margin-bottom: 0;
+            opacity: 0;
+        }
+
+        /* 折叠后显示的收缩摘要行 */
+        .section-summary {
+            display: none;
+            font-size: 11px; color: #888; padding: 2px 0 0 0; margin: 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .section-summary.show { display: block; }
+
+        .btn {
+            padding: 6px 14px; border: none; border-radius: 4px;
+            cursor: pointer; font-size: 12px; font-family: inherit; font-weight: 500;
+            transition: background 0.15s;
+        }
+        .btn:disabled { background: #bbb !important; cursor: not-allowed; }
+        .btn-sm {
+            padding: 2px 8px !important;
+            height: 22px !important;
+            line-height: 18px;
+            font-size: 11px !important;
+            margin: 0 !important;
+            border-radius: 3px;
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+        /* 已捕获后按钮行隐藏，节省垂直高度（未捕获时正常显示大按钮） */
+        .section.is-captured .slot-action-row {
+            height: 0 !important;
+            overflow: hidden;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .btn-capture { background: #2b579a; color: #fff; margin-top: 6px; }
+        .btn-capture:hover { background: #1a3d6b; }
+        .btn-save   { background: #107c10; color: #fff; }
+        .btn-save:hover { background: #0b5e0b; }
+        .btn-online { background: #e65100; color: #fff; }
+        .btn-online:hover { background: #bf360c; }
+        .btn-clear  { background: #fff; color: #666; border: 1px solid #ccc; }
+        .btn-clear:hover { background: #f0f0f0; }
+
+        .btn-algo { background: #f0f0f0; color: #555; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-family: inherit; }
+        .btn-algo:hover { background: #e0e0e0; }
+        .algo-active { background: #2b579a; color: #fff; border-color: #2b579a; }
+        .algo-active:hover { background: #1a3d6b; }
+        .algo-active-green { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+        .algo-active-green:hover { background: #1b5e20; }
+
+        /* 结果区 + 数字面板：按自然文档流排列，不再用 flex 分配高度，
+           这样数字面板固定 500px 能完整显示，超出时 main-content 自动出滚动条 */
+        .result-area-wrapper {
+            display: none;
+        }
+        .result-section {
+            background: #fff; border: 1px solid #d0d0d0;
+            border-radius: 6px; margin-bottom: 6px;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        .result-area-wrapper .result-section .section-body {
+            flex: 0 1 auto;
+            max-height: 300px;
+            overflow: hidden;
+            transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        .result-area-wrapper .result-section .section-body.collapsed {
+            max-height: 0;
+            padding: 0;
+            opacity: 0;
+        }
+        .result-header {
+            padding: 3px 10px; border-bottom: 1px solid #eee;
+            display: flex; align-items: center; justify-content: space-between;
+            font-weight: bold; font-size: 12px; color: #333;
+            min-height: 28px;
+        }
+        .result-header select, .result-header label, .result-header button {
+            height: 22px;
+            font-size: 10px;
+            margin: 0;
+        }
+        .result-header select {
+            padding: 0 4px;
+            line-height: 22px;
+        }
+        .result-header .collapse-btn {
+            width: 20px !important;
+            height: 20px !important;
+            line-height: 18px !important;
+            font-size: 10px !important;
+            padding: 0 !important;
+        }
+        .result-stats { font-weight: normal; font-size: 10px; color: #888; }
+        .result-stats .ins-count { color: #107c10; }
+        .result-stats .del-count { color: #c62828; }
+        .view-mode {
+            font-size: 10px; padding: 0 6px; border: 1px solid #ccc;
+            border-radius: 3px; background: #fff; color: #333; cursor: pointer;
+            height: 22px;
+        }
+
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .diff-content {
+            padding: 10px 12px;
+            overflow-y: auto;
+            font-size: 13px; line-height: 1.8;
+            white-space: pre-wrap; word-break: break-all;
+            flex: 1 1 auto;
+            min-height: 60px;
+        }
+        /* diff 标记 */
+        .diff-del {
+            background: #ffcdd2; color: #b71c1c;
+            text-decoration: line-through;
+            padding: 1px 2px; border-radius: 2px;
+        }
+        .diff-ins {
+            background: #c8e6c9; color: #1b5e20;
+            padding: 1px 2px; border-radius: 2px;
+        }
+        .diff-eq  { color: #333; }
+        .diff-collapsed {
+            background: #f5f5f5; color: #999;
+            font-size: 11px; font-style: italic;
+            padding: 0 4px; border-radius: 2px;
+            white-space: nowrap; text-decoration: none !important;
+            font-weight: normal !important;
+        }
+
+        /* 逐处跳转 */
+        .diff-chunk { transition: background 0.12s; }
+        .diff-chunk.active { background: #fff9c4 !important; outline: 2px solid #ff6f00; border-radius: 3px; }
+        .jump-bar { padding: 4px 12px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+        .jump-btn { background: #f5f5f5; color: #333; border: 1px solid #ddd; padding: 3px 10px; font-size: 11px; border-radius: 3px; cursor: pointer; }
+        .jump-btn:hover { background: #e0e0e0; }
+        #jumpCounter { color: #888; min-width: 36px; text-align: center; }
+        .focus-mode-a #sectionB,
+        .focus-mode-a #resultArea,
+        .focus-mode-b #sectionA,
+        .focus-mode-b #resultArea,
+        .focus-mode-result #sectionA,
+        .focus-mode-result #sectionB { display: none !important; }
+
+        /* focus mode：让显示的 section 撑满 main-content */
+        .focus-mode-a .main-content,
+        .focus-mode-b .main-content {
+            display: flex; flex-direction: column;
+        }
+        .focus-mode-a #sectionA,
+        .focus-mode-b #sectionB {
+            flex: 1 1 auto;
+            display: flex !important;
+            flex-direction: column;
+            min-height: 600px;
+            height: 600px;
+        }
+        .focus-mode-a #bodyA,
+        .focus-mode-b #bodyB {
+            flex: 1 1 auto;
+            max-height: none !important;
+            height: 100%;
+            overflow-y: auto !important;
+            display: flex !important;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .focus-mode-a #wrapA,
+        .focus-mode-b #wrapB {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .focus-mode-a #previewA,
+        .focus-mode-b #previewB {
+            flex: 1 1 auto;
+            height: 100% !important;
+            max-height: none !important;
+            min-height: 500px !important;
+            overflow-y: auto !important;
+        }
+
+        .action-row {
+            display: flex; gap: 6px; margin-top: 5px; align-items: center;
+            flex-wrap: nowrap;
+        }
+
+        /* 状态条：合并进底部一行，放在右端，紧凑样式 */
+        #statusBar {
+            margin: 0 0 0 auto;    /* 自动推到最右侧 */
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            min-height: 20px;
+            line-height: 1.2;
+            flex: 0 1 auto;
+            max-width: 55%;         /* 不超过一半宽度，左侧留给按钮 */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .status-ok   { background: #e8f5e9; color: #2e7d32; }
+        .status-info { background: #e3f2fd; color: #1565c0; }
+        .status-err  { background: #ffebee; color: #c62828; }
+
+        .hint { font-size: 10px; color: #999; margin-top: 3px; }
+
+        /* 数字修改清单 — 独立面板，在 wrapper 内共享空间 */
+        .number-changes {
+            border: 1px solid #2b579a;
+            border-radius: 6px;
+            background: #fff;
+            box-shadow: 0 2px 6px rgba(43,87,154,0.12);
+            display: flex;
+            flex-direction: column;
+            flex: 0 0 auto;
+            height: 500px;
+            min-height: 500px;
+            max-height: 500px;
+            overflow: hidden;
+            position: relative;
+            z-index: 5;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        /* 核心修复：让 filters 固定、body 获得剩余高度并独立滚动 */
+        #numberChangesContent {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 auto;
+            min-height: 0;
+            width: 100%;
+            overflow: hidden;
+        }
+        .number-changes-header {
+            padding: 4px 8px;
+            background: linear-gradient(180deg, #3b7dd8, #2b579a);
+            color: #fff;
+            font-size: 12px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex: 0 0 auto;
+        }
+        .number-changes-count {
+            color: #d0e4ff;
+            font-size: 10px;
+            font-weight: normal;
+            margin-right: 4px;
+        }
+        .btn-copy-num {
+            padding: 1px 8px; font-size: 10px;
+            background: rgba(255,255,255,0.2); color: #fff;
+            border: 1px solid rgba(255,255,255,0.4); border-radius: 3px;
+            cursor: pointer; font-family: inherit;
+        }
+        .btn-copy-num:hover { background: rgba(255,255,255,0.35); }
+        .collapse-num-btn {
+            background: transparent; color: #fff; border: none;
+            font-size: 12px; cursor: pointer; padding: 0 2px; margin-right: 2px;
+        }
+        .number-changes-filters {
+            padding: 2px 8px;
+            background: #f5f8ff;
+            border-top: 1px solid #e0e8f5;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 10px;
+            color: #555;
+            flex: 0 0 auto;
+        }
+        .number-changes-filters label {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .number-changes-filters input[type="checkbox"] {
+            margin: 0;
+            cursor: pointer;
+        }
+        .num-nav-btn {
+            padding: 1px 5px;
+            font-size: 9.5px;
+            line-height: 1;
+            background: rgba(255,255,255,0.18);
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 3px;
+            cursor: pointer;
+            color: #fff;
+            font-family: inherit;
+            height: 20px;
+        }
+        .num-nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.35); border-color: #fff; }
+        .num-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .number-changes-body {
+            overflow-y: scroll;      /* 垂直滚动条：始终显示占位 */
+            overflow-x: hidden;      /* 水平方向不许溢出，避免出现横向滚动条干扰垂直滚动条 */
+            flex: 1 1 auto;
+            position: relative;
+            min-height: 0;
+            max-height: none;
+            scrollbar-gutter: stable; /* Windows：为滚动条预留固定空间，避免抖动/错位 */
+            padding-right: 0;
+        }
+        /* Windows 下强制滚动条可见（避免浅色滚动条与背景融为一体） */
+        .number-changes-body::-webkit-scrollbar {
+            width: 14px;
+        }
+        .number-changes-body::-webkit-scrollbar-track {
+            background: #eef2f8;
+            border-left: 1px solid #d0d8e4;
+        }
+        .number-changes-body::-webkit-scrollbar-thumb {
+            background: #7fa4d4;
+            border: 2px solid #eef2f8;
+            border-radius: 7px;
+        }
+        .number-changes-body::-webkit-scrollbar-thumb:hover {
+            background: #2b579a;
+        }
+        .number-changes-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 12px;
+            background: #fff;
+            table-layout: fixed;
+        }
+        .number-changes-table th {
+            background: #f5f8ff;
+            padding: 2px 4px;
+            text-align: left;
+            position: sticky;       /* 表头锁定 = 滚动时始终贴在 number-changes-body 顶部 */
+            top: 0;
+            z-index: 3;
+            border-bottom: 1px solid #2b579a;
+            font-weight: 600;
+            color: #2b579a;
+            font-size: 10px;
+            box-shadow: 0 1px 0 #2b579a; /* 锁定时视觉分隔线 */
+        }
+        .number-changes-table td {
+            padding: 1px 4px !important;
+            border-bottom: 1px solid #f0f0f0;
+            color: #333;
+            vertical-align: top;
+            font-size: 10px;
+            line-height: 1.2;
+        }
+        .number-changes-table tr:last-child td {
+            border-bottom: none;
+        }
+        .number-changes-table tr.selected-row td {
+            background: #fff3cd !important;
+        }
+        .number-changes-table tbody tr {
+            cursor: pointer;
+        }
+        .col-idx { width: 24px; min-width: 24px; max-width: 24px; color: #999; text-align: center; padding: 1px 0 !important; }
+        .col-seq { color: #333; font-size: 10px; max-width: 80px; width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .col-len { width: 26px; min-width: 26px; max-width: 26px; color: #999; text-align: center; font-family: Consolas, Monaco, monospace; padding: 1px 0 !important; font-size: 10px; }
+        /* 注意：td 本身不能可靠地限制 max-height —— 真正的高度限制由内层 .cell-clamp div 承担 */
+        .col-after-a { color: #c62828; width: 140px; max-width: 140px; min-width: 140px; padding: 1px 2px !important; vertical-align: top; }
+        .col-after-b { color: #1b5e20; font-weight: 600; width: 140px; max-width: 140px; min-width: 140px; padding: 1px 2px !important; vertical-align: top; }
+        .col-pos { width: 42px; min-width: 42px; max-width: 42px; color: #999; text-align: center; font-size: 9.5px; padding: 1px 0 !important; }
+        .col-loc { width: 20px; min-width: 20px; max-width: 20px; text-align: center; white-space: nowrap; padding: 1px 0 !important; }
+        /* 表头列宽：与 td 列宽保持一致，保证 table-layout: fixed 按 th 精确分配 */
+        .col-idx-th { width: 24px; min-width: 24px; max-width: 24px; text-align: center; padding: 2px 0 !important; }
+        .col-seq-th { width: 80px; min-width: 80px; max-width: 80px; padding: 2px 2px !important; }
+        .col-len-th { width: 26px; min-width: 26px; max-width: 26px; text-align: center; padding: 2px 0 !important; }
+        .col-after-a-th { width: 140px; min-width: 140px; max-width: 140px; padding: 2px 2px !important; }
+        .col-after-b-th { width: 140px; min-width: 140px; max-width: 140px; padding: 2px 2px !important; }
+        .col-pos-th { width: 42px; min-width: 42px; max-width: 42px; text-align: center; padding: 2px 0 !important; }
+        .col-loc-th { width: 20px; min-width: 20px; max-width: 20px; text-align: center; padding: 2px 0 !important; }
+        /* 单元格内容高度钳制：4行字 ≈ 48px，超出部分隐藏（这层放在 td 内部才真正生效） */
+        .cell-clamp {
+            max-height: 48px;
+            overflow: hidden;
+            width: 100%;
+            line-height: 1.2;
+            font-family: Consolas, Monaco, monospace;
+            font-size: 9.5px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .col-hide-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            margin-left: 5px; padding: 0;
+            width: 14px; height: 14px; line-height: 12px;
+            font-size: 11px; font-weight: 700; cursor: pointer;
+            color: #fff; background: #ff6b6b;
+            border: 1px solid #ff3b3b; border-radius: 3px;
+            user-select: none; vertical-align: middle;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            transition: background 0.15s;
+        }
+        .col-hide-btn:hover { background: #ff2828; border-color: #d40000; }
+        /* 隐藏列时，对应 th/td 中该类全部隐藏 */
+        .col-seq.hidden, .col-seq-th.hidden,
+        .col-len.hidden, .col-len-th.hidden,
+        .col-after-a.hidden, .col-after-a-th.hidden,
+        .col-after-b.hidden, .col-after-b-th.hidden,
+        .col-pos.hidden, .col-pos-th.hidden,
+        .col-loc.hidden, .col-loc-th.hidden { display: none; }
+        /* 显示全部列按钮（列头右下角） */
+        .show-cols-btn {
+            position: absolute; right: 2px; top: 2px; padding: 1px 6px;
+            font-size: 10px; background: rgba(255,255,255,0.2); color: #fff;
+            border: 1px solid rgba(255,255,255,0.4); border-radius: 3px; cursor: pointer;
+        }
+        .show-cols-btn:hover { background: rgba(255,255,255,0.4); }
+        .number-changes-body { position: relative; }
+        .loc-a { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .loc-b { background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; }
+        .loc-btn:hover { filter: brightness(0.95); }
+        .number-changes-empty {
+            color: #aaa;
+            font-style: italic;
+            text-align: center;
+            padding: 8px !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-content">
+    <!-- 段落 A -->
+    <div class="section" id="sectionA">
+        <div class="section-header">
+            <span class="section-label"><span class="badge badge-a">A</span>原始版本</span>
+            <span style="display:flex;align-items:center;gap:4px;">
+                <label style="font-size:10px;color:#666;display:inline-flex;align-items:center;gap:2px;" title="展开/捕获后的文本框高度（px），回车生效并记忆">
+                    高:<input type="number" id="boxHeightA" min="30" style="width:44px;height:20px;font-size:10px;border:1px solid #ddd;border-radius:3px;padding:0 2px;">
+                </label>
+                <span id="statusA" class="not-captured">未捕获</span>
+                <button class="hdr-locate-btn" id="locateSelABtn" title="把当前选中的文本滚到文本框可视区（末尾在底部往上第2-3行）">定位</button>
+                <button class="collapse-btn" id="collapseABtn" title="折叠/展开">▼</button>
+                <button class="collapse-btn" id="focusABtn" title="放大查看" style="font-size:13px;">⛶</button>
+            </span>
+        </div>
+        <div id="bodyA" class="section-body">
+            <div class="preview-wrap" id="wrapA">
+                <textarea id="previewA" class="preview-box" placeholder="选中段落后点击「捕获段落 A」"></textarea>
+                <pre class="preview-mirror" id="mirrorA" aria-hidden="true"></pre>
+            </div>
+            <div class="slot-action-row" style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;">
+                <button class="btn btn-capture btn-sm" id="captureABtn">捕获A</button>
+                <button class="btn btn-clear-slot btn-sm" id="clearABtn" style="background:#fafafa;color:#999;">清</button>
+                <button class="btn btn-full btn-sm" id="fullABtn" style="background:#eef0ff;color:#3949ab;">全文</button>
+            </div>
+        </div>
+        <div id="summaryA" class="section-summary"></div>
+    </div>
+
+    <!-- 段落 B -->
+    <div class="section" id="sectionB">
+        <div class="section-header">
+            <span class="section-label"><span class="badge badge-b">B</span>修改版本</span>
+            <span style="display:flex;align-items:center;gap:4px;">
+                <label style="font-size:10px;color:#666;display:inline-flex;align-items:center;gap:2px;" title="展开/捕获后的文本框高度（px），回车生效并记忆">
+                    高:<input type="number" id="boxHeightB" min="30" style="width:44px;height:20px;font-size:10px;border:1px solid #ddd;border-radius:3px;padding:0 2px;">
+                </label>
+                <span id="statusB" class="not-captured">未捕获</span>
+                <button class="hdr-locate-btn" id="locateSelBBtn" title="把当前选中的文本滚到文本框可视区（末尾在底部往上第2-3行）">定位</button>
+                <button class="collapse-btn" id="collapseBBtn" title="折叠/展开">▼</button>
+                <button class="collapse-btn" id="focusBBtn" title="放大查看" style="font-size:13px;">⛶</button>
+            </span>
+        </div>
+        <div id="bodyB" class="section-body">
+            <div class="preview-wrap" id="wrapB">
+                <textarea id="previewB" class="preview-box" placeholder="选中段落后点击「捕获段落 B」"></textarea>
+                <pre class="preview-mirror" id="mirrorB" aria-hidden="true"></pre>
+            </div>
+            <div class="slot-action-row" style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;">
+                <button class="btn btn-capture btn-sm" id="captureBBtn">捕获B</button>
+                <button class="btn btn-clear-slot btn-sm" id="clearBBtn" style="background:#fafafa;color:#999;">清</button>
+                <button class="btn btn-full btn-sm" id="fullBBtn" style="background:#eef0ff;color:#3949ab;">全文</button>
+            </div>
+        </div>
+        <div id="summaryB" class="section-summary"></div>
+    </div>
+
+    <!-- 结果区 + 数字面板 共享剩余空间 -->
+    <div id="resultArea" class="result-area-wrapper">
+        <div class="result-section">
+            <div class="result-header">
+                <span>对比结果</span>
+                <span style="display:flex;align-items:center;gap:6px;">
+                    <select class="view-mode" id="viewMode">
+                        <option value="diff">显示差异</option>
+                        <option value="clean">仅显示新文本</option>
+                    </select>
+                    <span class="result-stats" id="resultStats"></span>
+                    <label style="font-size:10px;color:#666;display:inline-flex;align-items:center;gap:3px;cursor:pointer;user-select:none;">
+                        <input type="checkbox" id="autoOpenResult"> 自动打开
+                    </label>
+                    <button class="collapse-btn" id="collapseResultBtn" title="折叠/展开">▼</button>
+                </span>
+            </div>
+            <div id="bodyResult" class="section-body">
+            <div class="jump-bar">
+                <button class="jump-btn" id="jumpPrevBtn" onclick="jumpPrev()">◀ 上一处</button>
+                <span id="jumpCounter">-/ -</span>
+                <button class="jump-btn" id="jumpNextBtn" onclick="jumpNext()">下一处 ▶</button>
+                <button class="jump-btn" id="focusBtn" onclick="toggleFocusMode('result')" style="margin-left:auto;background:#e8eaf6;color:#3949ab;border-color:#c5cae9;">全屏</button>
+            </div>
+            <div class="diff-content" id="diffContent"></div>
+            <div style="padding:6px 12px 10px;" class="action-row">
+                <button class="btn btn-save" id="copyBtn">复制结果（粘贴到 Word）</button>
+                <button class="btn btn-save" id="saveBtn" style="background:#d84315;">保存到本地（DOCX）</button>
+            </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 公共子序列清单（在 result-area-wrapper 内，自然文档流显示，固定500px完整可见） -->
+    <div class="number-changes" id="numberChanges">
+            <div class="number-changes-header">
+                <span style="display:flex;align-items:center;gap:4px;flex:1 1 auto;min-width:0;">
+                    <button class="collapse-num-btn" id="collapseNumBtn" title="折叠/展开">▼</button>
+                    <!-- 导航按钮：放在最左侧，填充原来标题栏浪费的中间空白 -->
+                    <button class="num-nav-btn" id="navFirstBtn" title="跳公共子序列第一行">⏮最前</button>
+                    <button class="num-nav-btn" id="navPrevBtn" title="跳到当前行的上一行">◀上</button>
+                    <button class="num-nav-btn" id="navCurrBtn" title="在 A/B 中定位当前选中的行">★当前</button>
+                    <button class="num-nav-btn" id="navNextBtn" title="跳到当前行的下一行">下▶</button>
+                    <button class="num-nav-btn" id="navLastBtn" title="跳公共子序列最后一行">最后⏭</button>
+                    <span style="white-space:nowrap;margin-left:4px;">公共子序列清单（≥20字符）</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:4px;flex:0 0 auto;">
+                    <span class="number-changes-count" id="numberChangesCount">待对比</span>
+                    <button class="btn-copy-num" id="copyNumberChangesBtn">复制</button>
+                    <button class="btn-copy-num" id="xlsxNumberChangesBtn" style="background:#1565c0;">XLSX</button>
+                </span>
+            </div>
+            <div id="numberChangesContent">
+                <div class="number-changes-body">
+                    <table class="number-changes-table">
+                        <thead>
+                            <tr>
+                                <th class="col-idx-th">#</th>
+                                <th class="col-seq-th">子序列<span class="col-hide-btn" data-col="col-seq">×</span></th>
+                                <th class="col-len-th">长度<span class="col-hide-btn" data-col="col-len">×</span></th>
+                                <th class="col-after-a-th">旧后100<span class="col-hide-btn" data-col="col-after-a">×</span></th>
+                                <th class="col-after-b-th">新后100<span class="col-hide-btn" data-col="col-after-b">×</span></th>
+                                <th class="col-pos-th">A|B位置<span class="col-hide-btn" data-col="col-pos">×</span></th>
+                                <th class="col-loc-th">定位<span class="col-hide-btn" data-col="col-loc">×</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="numberChangesBody">
+                            <tr><td colspan="7" class="number-changes-empty">捕获段落后自动检测</td></tr>
+                        </tbody>
+                    </table>
+                    <button class="show-cols-btn" id="showAllColsBtn" style="display:none;" title="显示全部隐藏的列">+ 全部显示</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+    <!-- 通用操作 / 算法选择 / 状态：合并为一行，节省垂直空间 -->
+    <div class="action-row" style="margin-top:6px;">
+        <button class="btn btn-swap" id="swapBtn" style="background:#6c757d;color:#fff;padding:3px 10px;font-size:11px;">互换 A ⇄ B</button>
+        <button class="btn btn-clear" id="clearBtn" style="padding:3px 10px;font-size:11px;">清除全部</button>
+        <span style="font-size:11px;color:#888;margin:0 2px 0 4px;">算法：</span>
+        <button class="btn btn-algo algo-active" id="algoAnchor" onclick="switchAlgo('anchor')" style="padding:3px 10px;font-size:11px;">改进后</button>
+        <button class="btn btn-algo" id="algoClassic" onclick="switchAlgo('classic')" style="padding:3px 10px;font-size:11px;">经典LCS</button>
+        <button class="btn btn-algo" id="algoLine" onclick="switchAlgo('line')" style="padding:3px 10px;font-size:11px;">按行对比</button>
+        <button class="btn btn-algo" id="algoHier" onclick="switchAlgo('hier')" style="padding:3px 10px;font-size:11px;">分级回溯</button>
+        <div id="statusBar"></div>
+    </div>
+
+    <!-- JSZip CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    var statusEl;
+    var LS_KEY_A = 'compare_para_a_v4';
+    var LS_KEY_B = 'compare_para_b_v4';
+    var gDiffOps = [];   // 最近一次 diff 操作结果，供保存 DOCX 使用
+    var gNumberChanges = []; // 最近一次提取的公共子序列清单，供复制/导出使用
+    var COLLAPSE_LEN = 80;   // 连续删除/新增超过此字数则折叠显示
+
+    var NOISE_MATCH = 6;     // 连续匹配字数 ≤ 此值，且前/后有大段增删 → 视为噪声合并
+    var gViewMode = 'diff';  // 'diff' 显示差异, 'clean' 仅显示新文本（排除删除）
+    var gDiffAlgo = 'anchor'; // 'anchor' 改进后 | 'classic' 经典LCS | 'line' 按行对比
+    // 让 locateSequence 之类能跨闭包，直接点名刷新某一侧的选区镜像层
+    var gRefreshMirror = {};  // { previewA: function, previewB: function }
+
+    var gLastRangedCache = {};  // { previewA: {...}, previewB: {...} }（保留：给 snapshotRanged 传引用）
+
+    /* ========================================================================
+       选区着色新方案（彻底不依赖 textarea 原生选中是否被 blur 折叠）：
+
+       gSelRanges 作为 A/B 两框"视觉选区"的唯一真源，每一侧最多存 1 个。
+         - key    = textarea id（previewA / previewB）
+         - value  = { s, e, source }
+             s / e  = textarea.value 的原始下标（开区间 end）
+             source = 'program' → 绿色（公共子序列定位 / 数字面板定位 / 右上角『定位』）
+                      'user'    → 橙色（鼠标拖、键盘选）
+
+       三个基础操作（任何定位入口统一走这一套）：
+         clearSelHighlight(taId)             — 清掉某一侧已有颜色
+         setSelHighlight(taId, s, e, source) — 写新选区 + 立即重画这一侧镜像
+         applySelToMirror(taId)              — 用 gSelRanges[taId] 直接让 refreshMirror 画，
+                                                不读 ta.selectionStart/End，不被 blur 影响
+       ======================================================================== */
+    var gSelRanges = { previewA: null, previewB: null };
+
+    function clearSelHighlight(taId) {
+        if (gSelRanges) gSelRanges[taId] = null;
+        // 顺手把 textarea 的原生选中也清成光标（避免系统蓝残留但镜像层又画一块，视觉双重）
+        try {
+            var ta = document.getElementById(taId);
+            if (ta && ta.setSelectionRange && ta.value != null) {
+                var p = Math.min(ta.selectionStart != null ? ta.selectionStart : 0, ta.value.length);
+                ta.setSelectionRange(p, p);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    function setSelHighlight(taId, s, e, source) {
+        source = source || 'user';
+        var ta = document.getElementById(taId);
+        var L = ta && ta.value != null ? ta.value.length : 0;
+        s = Math.max(0, Math.min(s == null ? 0 : s, L));
+        e = Math.max(s, Math.min(e == null ? s : e, L));
+        gSelRanges[taId] = (s < e) ? { s: s, e: e, source: source } : null;
+        // 统一同步原生选中（与 source 无关），理由：
+        //   ① scrollCurrentSelectionToNearBottom 必须基于 ta.selectionStart/End
+        //     里真实非空的 start < end 才能走到底，否则开头 if(start===end)return；
+        //   ② 右上角 A/B『定位』按钮走的是 source='user'（表示这范围来自用户手选），
+        //     也仍然需要原生选中不空，否则定位按钮点完连滚动都不触发，用户会觉得
+        //     "定位后字符串跟原来不同/没定位成功"；
+        //   ③ 颜色来源是由 wrap[data-sel-source] 属性决定的，与"原生选区是否被设置"
+        //     已经彻底解耦（::selection 透明，人眼看不到原生选区）。
+        if (ta && ta.setSelectionRange) {
+            try { ta.setSelectionRange(s, e); } catch (err) { /* ignore */ }
+        }
+        var wrap = ta && ta.parentElement ? ta.parentElement.closest('.preview-wrap') : null;
+        if (wrap) wrap.setAttribute('data-sel-source', (s < e ? source : 'user'));
+        if (typeof gRefreshMirror !== 'undefined' && gRefreshMirror[taId]) {
+            try { gRefreshMirror[taId](); } catch (err) { /* ignore */ }
+        }
+    }
+
+    /* ================================================================
+       原文 ↔ 标准化文本 的双向字符位置映射：
+       - diff / extractCommonSequences 基于 normalizeText(raw) 计算，所以
+         公共子序列清单里的 aPos/bPos/length 都是"标准化文本里的下标"
+       - 用户 textarea 里显示的是 raw，这样"右上角 A/B 定位按钮、手动选区、
+         光标位置"才不被破坏
+       - locateSequence 要做 setSelectionRange 必须把"标准化下标"换算回
+         "原文 textarea 的下标"——computeAndShowDiff 会为 A、B 各建一套映射。
+
+       返回值：
+         ntr: ntr[i] = 标准化第 i 个字符，在原文里对应哪个下标（norm→raw）
+         rtn: rtn[j] = 原文第 j 个字符，在标准化里对应哪个下标（raw→norm，
+              被 normalizeText 跳过的字符（多余空白/\r 等）会指向"当前位置"
+              的 norm 索引，locateSequence 不用这条所以不重要）
+       ================================================================ */
+    function buildRawNormMap(raw, norm) {
+        raw = raw == null ? '' : String(raw);
+        norm = norm == null ? '' : String(norm);
+        var R = raw.length;
+
+        // —— 阶段 A：逐字扫描 raw，同步复刻 normalizeText 的 ①②③ 步
+        //    （换行统一、特殊空白→空格、连续空格/TAB 合并），
+        //    产出一个中间字符序列 chars + 每个 chars[k] 在 raw 里的起点 origins[k]。
+        var chars = [];
+        var origins = [];
+        var inWs = false;
+        for (var i = 0; i < R; i++) {
+            var code = raw.charCodeAt(i);
+
+            // ① \r\n → 单个 \n；锚点落在 \r 的下标
+            if (code === 0x0D /* \r */) {
+                inWs = false;
+                chars.push('\n');
+                origins.push(i);
+                if (i + 1 < R && raw.charCodeAt(i + 1) === 0x0A /* \n */) i++;
+                continue;
+            }
+            // ① 剩余：单个 \n → \n
+            if (code === 0x0A) {
+                inWs = false;
+                chars.push('\n');
+                origins.push(i);
+                continue;
+            }
+            // ② 特殊空白 \u00A0 / \u2000-\u200B / \u3000 → 普通空格，并参与合并
+            if (code === 0x00A0 || (code >= 0x2000 && code <= 0x200B) || code === 0x3000) {
+                if (!inWs) { chars.push(' '); origins.push(i); inWs = true; }
+                continue;
+            }
+            // ③ 空格 / TAB 合并
+            if (code === 0x20 || code === 0x09) {
+                if (!inWs) { chars.push(' '); origins.push(i); inWs = true; }
+                continue;
+            }
+            // 普通字符
+            inWs = false;
+            chars.push(raw.charAt(i));
+            origins.push(i);
+        }
+
+        // —— 阶段 B：复刻 normalizeText 第 ④ 步 trim()
+        var preTrim = chars.join('');
+        var trimmed = preTrim.trim();
+        var leadCut = 0;
+        if (trimmed.length !== preTrim.length) {
+            leadCut = (trimmed.length === 0) ? preTrim.length : preTrim.indexOf(trimmed);
+            if (leadCut < 0) leadCut = 0;
+        }
+        var midLen = trimmed.length;
+
+        // —— 阶段 C：输出 ntr（norm→raw）
+        var ntr = new Array(midLen);
+        for (var k = 0; k < midLen; k++) ntr[k] = origins[leadCut + k];
+
+        // —— 阶段 D：输出 rtn（raw→norm，粗配对，够看就行）
+        var rtn = new Array(R);
+        var ni = 0;
+        for (var jj = 0; jj < R; jj++) {
+            while (ni + 1 < midLen && jj >= ntr[ni + 1]) ni++;
+            rtn[jj] = Math.min(ni, midLen);
+        }
+
+        // 安全兜底：若严格复现出来的标准化长度与外部 norm（= normalizeText(raw)）
+        // 不一致，说明未来有人改了 normalizeText 却没同步改这里——退回到旧
+        // 版逐字符全等配对方案，保证不会彻底崩。
+        if (midLen !== norm.length) {
+            var N2 = norm.length;
+            var ntrFb = new Array(N2);
+            var rtnFb = new Array(R);
+            var iFb = 0, jFb = 0;
+            while (iFb < R && jFb < N2) {
+                if (raw.charAt(iFb) === norm.charAt(jFb)) {
+                    ntrFb[jFb] = iFb;
+                    rtnFb[iFb] = jFb;
+                    iFb++; jFb++;
+                } else {
+                    rtnFb[iFb] = jFb;
+                    iFb++;
+                }
+            }
+            while (iFb < R) { rtnFb[iFb] = jFb; iFb++; }
+            while (jFb < N2) { ntrFb[jFb] = (R - 1) < 0 ? 0 : (R - 1); jFb++; }
+            return { ntr: ntrFb, rtn: rtnFb, _fallback: true };
+        }
+
+        return { ntr: ntr, rtn: rtn };
+    }
+    var gPosMaps = { a: null, b: null };
+
+    /* ============================================================
+       工具函数
+       ============================================================ */
+    function setStatus(msg, cls) {
+        statusEl.textContent = msg;
+        statusEl.className = cls;
+    }
+
+    /* ============================================================
+       区域折叠 / 展开
+       ============================================================ */
+    function toggleSection(bodyId, btnId, summaryId) {
+        var body = document.getElementById(bodyId);
+        var btn = document.getElementById(btnId);
+        var summary = document.getElementById(summaryId);
+        if (!body || !btn) return;
+        var isCollapsed = body.classList.contains('collapsed');
+        if (isCollapsed) {
+            body.classList.remove('collapsed');
+            btn.classList.remove('collapsed');
+            btn.title = '折叠';
+            btn.textContent = '▼';
+            if (summary) summary.classList.remove('show');
+        } else {
+            body.classList.add('collapsed');
+            btn.classList.add('collapsed');
+            btn.title = '展开';
+            btn.textContent = '▼';
+            if (summary) summary.classList.add('show');
+        }
+    }
+
+    function collapseSection(bodyId, btnId, summaryId) {
+        var body = document.getElementById(bodyId);
+        var btn = document.getElementById(btnId);
+        var summary = document.getElementById(summaryId);
+        if (!body || body.classList.contains('collapsed')) return;
+        body.classList.add('collapsed');
+        btn.classList.add('collapsed');
+        btn.title = '展开';
+        btn.textContent = '▼';
+        if (summary) summary.classList.add('show');
+    }
+
+    function expandSection(bodyId, btnId, summaryId) {
+        var body = document.getElementById(bodyId);
+        var btn = document.getElementById(btnId);
+        var summary = document.getElementById(summaryId);
+        if (!body || !body.classList.contains('collapsed')) return;
+        body.classList.remove('collapsed');
+        btn.classList.remove('collapsed');
+        btn.title = '折叠';
+        btn.textContent = '▼';
+        if (summary) summary.classList.remove('show');
+    }
+
+    function updateCollapseSummary(slot) {
+        var key = slot === 'a' ? LS_KEY_A : LS_KEY_B;
+        var text = localStorage.getItem(key) || '';
+        var summaryEl = document.getElementById('summary' + slot.toUpperCase());
+        if (!summaryEl) return;
+        if (text) {
+            summaryEl.textContent = '已捕获 ' + text.length + ' 字 — ' + text.substring(0, 40) + (text.length > 40 ? '…' : '');
+        } else {
+            summaryEl.textContent = '未捕获';
+        }
+    }
+
+    function xmlEscape(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /* ============================================================
+       捕获段落
+       ============================================================ */
+    function captureParagraph(slot) {
+        setStatus('正在捕获段落 ' + slot.toUpperCase() + ' ...', 'status-info');
+        try {
+            Word.run(function (context) {
+                var sel = context.document.getSelection();
+                sel.load('text');
+                return context.sync().then(function () {
+                    var text = sel.text;
+                    if (!text || !text.trim()) {
+                        setStatus('未选中任何文字', 'status-err');
+                        return;
+                    }
+                    text = text.replace(/[\r\n]+$/, '');
+                    var key = slot === 'a' ? LS_KEY_A : LS_KEY_B;
+                    localStorage.setItem(key, text);
+                    updateUI();
+                    setStatus('段落 ' + slot.toUpperCase() + ' 已捕获（' + text.length + ' 字符）', 'status-ok');
+                }).catch(function (e) {
+                    setStatus('捕获失败: ' + (e.message || e), 'status-err');
+                });
+            }).catch(function (e) {
+                setStatus('捕获失败: ' + (e.message || e), 'status-err');
+            });
+        } catch (e) {
+            setStatus('捕获失败: ' + (e.message || e), 'status-err');
+        }
+    }
+
+    /* ============================================================
+       获取当前文档全部内容
+       ============================================================ */
+    function captureFullDocument(slot) {
+        setStatus('正在获取全文 ' + slot.toUpperCase() + ' ...', 'status-info');
+        try {
+            Word.run(function (context) {
+                var range = context.document.body.getRange();
+                range.load('text');
+                return context.sync().then(function () {
+                    var text = range.text;
+                    if (!text || !text.trim()) {
+                        setStatus('文档为空', 'status-err');
+                        return;
+                    }
+                    text = text.replace(/[\r\n]+$/, '');
+                    var key = slot === 'a' ? LS_KEY_A : LS_KEY_B;
+                    localStorage.setItem(key, text);
+                    updateUI();
+                    setStatus('全文已获取 ' + slot.toUpperCase() + '（' + text.length + ' 字符）', 'status-ok');
+                }).catch(function (e) {
+                    setStatus('获取全文失败: ' + (e.message || e), 'status-err');
+                });
+            }).catch(function (e) {
+                setStatus('获取全文失败: ' + (e.message || e), 'status-err');
+            });
+        } catch (e) {
+            setStatus('获取全文失败: ' + (e.message || e), 'status-err');
+        }
+    }
+
+    /* ============================================================
+       字符级 LCS 对比（中英混排适用）
+       ============================================================ */
+    function charDiff(textA, textB) {
+        var a = textA.split('');
+        var b = textB.split('');
+        var m = a.length, n = b.length;
+        var C = [];
+        for (var i = 0; i <= m; i++) { C[i] = []; for (var j = 0; j <= n; j++) C[i][j] = 0; }
+        for (var i = 1; i <= m; i++) {
+            for (var j = 1; j <= n; j++) {
+                C[i][j] = (a[i-1] === b[j-1]) ? C[i-1][j-1] + 1 : Math.max(C[i-1][j], C[i][j-1]);
+            }
+        }
+        var ops = [];
+        var i = m, j = n;
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+                ops.unshift({ type: 'equal', text: a[i-1] }); i--; j--;
+            } else if (j > 0 && (i === 0 || C[i][j-1] >= C[i-1][j])) {
+                ops.unshift({ type: 'insert', text: b[j-1] }); j--;
+            } else {
+                ops.unshift({ type: 'delete', text: a[i-1] }); i--;
+            }
+        }
+        // 合并相邻同类
+        var merged = [];
+        for (var k = 0; k < ops.length; k++) {
+            var last = merged.length > 0 ? merged[merged.length-1] : null;
+            if (last && last.type === ops[k].type) { last.text += ops[k].text; }
+            else { merged.push(ops[k]); }
+        }
+        return merged;
+    }
+
+    /* ============================================================
+       折叠超长删除/新增块 → 只显示首尾 + 字数摘要
+       ============================================================ */
+    function collapseLongOps(ops) {
+        var result = [];
+        for (var i = 0; i < ops.length; i++) {
+            var op = ops[i];
+            if (op.type === 'delete' && op.text.length > COLLAPSE_LEN) {
+                var head = op.text.substring(0, 12);
+                var tail = op.text.substring(op.text.length - 12);
+                var label = op.type === 'delete' ? '已删除' : '已新增';
+                var marker = '【···' + label + ' ' + op.text.length + ' 字···】';
+                result.push({
+                    type: op.type,
+                    collapsed: true,
+                    head: head,
+                    marker: marker,
+                    tail: tail,
+                    text: head + marker + tail  // 供 jump 总数统计
+                });
+            } else {
+                result.push(op);
+            }
+        }
+        return result;
+    }
+
+    /* ============================================================
+       吸收噪声匹配：大段删除中夹的小段匹配 → 合并到删除
+       ============================================================ */
+    function absorbTinyMatches(ops) {
+        var out = [];
+        for (var i = 0; i < ops.length; i++) {
+            var op = ops[i];
+            if (op.type === 'equal' && op.text.length <= NOISE_MATCH) {
+                var left = i > 0 ? ops[i - 1] : null;
+                var right = i < ops.length - 1 ? ops[i + 1] : null;
+                var leftBig = left && left.type !== 'equal' && left.text.length > NOISE_MATCH;
+                var rightBig = right && right.type !== 'equal' && right.text.length > NOISE_MATCH;
+
+                if (leftBig || rightBig) {
+                    var t = leftBig ? left.type : right.type;
+                    var last = out.length > 0 ? out[out.length - 1] : null;
+                    if (last && last.type === t) { last.text += op.text; }
+                    else { out.push({ type: t, text: op.text }); }
+                    continue;
+                }
+            }
+            var last = out.length > 0 ? out[out.length - 1] : null;
+            if (last && last.type === op.type) { last.text += op.text; }
+            else { out.push({ type: op.type, text: op.text }); }
+        }
+        return out;
+    }
+
+    /* ============================================================
+       渲染对比结果到 HTML（带分块，支持逐处跳转）
+       ============================================================ */
+    function renderDiff(ops) {
+        var html = '';
+        var delTotal = 0, insTotal = 0;
+        var inChunk = false;
+        var chunkIdx = 0;
+        for (var i = 0; i < ops.length; i++) {
+            var op = ops[i];
+            if (op.type === 'equal') {
+                if (inChunk) { html += '</span>'; inChunk = false; chunkIdx++; }
+                html += '<span class="diff-eq">' + htmlEscape(op.text) + '</span>';
+            } else {
+                if (!inChunk) {
+                    html += '<span class="diff-chunk" id="chunk-' + chunkIdx + '">';
+                    inChunk = true;
+                }
+                var cls = (op.type === 'delete') ? 'diff-del' : 'diff-ins';
+                if (op.collapsed) {
+                    html += '<span class="' + cls + '">' + htmlEscape(op.head) + '</span>';
+                    html += '<span class="diff-collapsed">' + htmlEscape(op.marker) + '</span>';
+                    html += '<span class="' + cls + '">' + htmlEscape(op.tail) + '</span>';
+                } else {
+                    html += '<span class="' + cls + '">' + htmlEscape(op.text) + '</span>';
+                }
+                if (op.type === 'delete') { delTotal += op.text.length; }
+                else { insTotal += op.text.length; }
+            }
+        }
+        if (inChunk) { html += '</span>'; chunkIdx++; }
+        return { html: html, delTotal: delTotal, insTotal: insTotal, chunkCount: chunkIdx };
+    }
+
+    function htmlEscape(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /* ============================================================
+       仅显示新文本（排除删除，保留新增高亮）
+       ============================================================ */
+    // 以 textB 为底本，用 ops 标记新增字符并绿色高亮。
+    // 这样无论 diff 怎么拆块，B 的全部字符都必然出现。
+    function renderClean(textB, ops) {
+        var len = textB.length;
+        var marks = new Array(len);
+        var bPos = 0;
+        // 先按 ops 填 marks：insert=1, equal=0
+        for (var i = 0; i < ops.length; i++) {
+            var op = ops[i];
+            var n = op.text.length;
+            if (op.type === 'equal') {
+                for (var j = 0; j < n; j++) marks[bPos + j] = 0;
+                bPos += n;
+            } else if (op.type === 'insert') {
+                for (var k = 0; k < n; k++) marks[bPos + k] = 1;
+                bPos += n;
+            }
+            // delete 不推进 bPos（仅 A 有）
+        }
+        // 兜底：ops 重建不够长（极少情况），剩余字符当 equal
+        for (var x = bPos; x < len; x++) marks[x] = 0;
+
+        var html = '';
+        var insTotal = 0;
+        var p = 0;
+        while (p < len) {
+            var t = marks[p];
+            var s = p;
+            while (p < len && marks[p] === t) p++;
+            var seg = textB.substring(s, p);
+            if (t === 1) {
+                html += '<span class="diff-ins">' + htmlEscape(seg) + '</span>';
+                insTotal += seg.length;
+            } else {
+                html += '<span class="diff-eq">' + htmlEscape(seg) + '</span>';
+            }
+        }
+        return { html: html, insTotal: insTotal };
+    }
+
+    /* ============================================================
+       逐处跳转（差异块 = 光标，上下不循环）
+       ============================================================ */
+    var gChunkCount = 0;
+    var gActiveChunk = -1;
+
+    // 首次跳转时，从当前滚动位置找到最近的可视差异块
+    function findNearestChunkAtViewport() {
+        var container = document.getElementById('diffContent');
+        var ct = container.getBoundingClientRect().top;
+        var viewTop = container.scrollTop;
+        var nearest = -1;
+        var nearestDist = Infinity;
+        for (var i = 0; i < gChunkCount; i++) {
+            var el = document.getElementById('chunk-' + i);
+            if (!el) continue;
+            var elTop = el.getBoundingClientRect().top - ct + viewTop;
+            var dist = elTop - viewTop;
+            // 挑最接近视口顶部且不低于顶部的块；否则取第一个
+            if (dist >= -20 && dist < nearestDist) {
+                nearestDist = dist;
+                nearest = i;
+            }
+        }
+        return nearest >= 0 ? nearest : 0;
+    }
+
+    function jumpNext() {
+        if (gChunkCount === 0) return;
+        // 没有激活块 → 从视口位置初始化光标
+        if (gActiveChunk < 0 || gActiveChunk >= gChunkCount) {
+            setActiveChunk(findNearestChunkAtViewport());
+            return;
+        }
+        // 光标在最后 → 提示
+        if (gActiveChunk >= gChunkCount - 1) {
+            setStatus('已是最后一处差异', 'status-info');
+            return;
+        }
+        setActiveChunk(gActiveChunk + 1);
+    }
+
+    function jumpPrev() {
+        if (gChunkCount === 0) return;
+        // 没有激活块 → 从视口位置初始化光标
+        if (gActiveChunk < 0 || gActiveChunk >= gChunkCount) {
+            setActiveChunk(findNearestChunkAtViewport());
+            return;
+        }
+        // 光标在最前 → 提示
+        if (gActiveChunk <= 0) {
+            setStatus('已是第一处差异', 'status-info');
+            return;
+        }
+        setActiveChunk(gActiveChunk - 1);
+    }
+
+    function setActiveChunk(idx) {
+        // 移除旧高亮
+        if (gActiveChunk >= 0) {
+            var oldEl = document.getElementById('chunk-' + gActiveChunk);
+            if (oldEl) oldEl.classList.remove('active');
+        }
+        gActiveChunk = idx;
+        var el = document.getElementById('chunk-' + idx);
+        if (el) {
+            el.classList.add('active');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        document.getElementById('jumpCounter').textContent = (idx + 1) + ' / ' + gChunkCount;
+    }
+
+    /* ============================================================
+       更新 UI + 自动触发对比
+       ============================================================ */
+    function updateUI() {
+        var textA = localStorage.getItem(LS_KEY_A) || '';
+        var textB = localStorage.getItem(LS_KEY_B) || '';
+
+        // 预览 A
+        var pA = document.getElementById('previewA');
+        var sA = document.getElementById('statusA');
+        var sectionA = document.getElementById('sectionA');
+        if (textA) {
+            pA.value = textA;
+            pA.className = 'preview-box';
+            sA.textContent = '已捕获';
+            sA.className = 'captured';
+            sectionA.classList.add('is-captured');
+        } else {
+            pA.value = '';
+            pA.className = 'preview-box';
+            sA.textContent = '未捕获';
+            sA.className = 'not-captured';
+            sectionA.classList.remove('is-captured');
+        }
+
+        // 预览 B
+        var pB = document.getElementById('previewB');
+        var sB = document.getElementById('statusB');
+        var sectionB = document.getElementById('sectionB');
+        if (textB) {
+            pB.value = textB;
+            pB.className = 'preview-box';
+            sB.textContent = '已捕获';
+            sB.className = 'captured';
+            sectionB.classList.add('is-captured');
+        } else {
+            pB.value = '';
+            pB.className = 'preview-box';
+            sB.textContent = '未捕获';
+            sB.className = 'not-captured';
+            sectionB.classList.remove('is-captured');
+        }
+
+        // 更新折叠摘要行
+        updateCollapseSummary('a');
+        updateCollapseSummary('b');
+
+        // 如果两者都已捕获 → 自动计算对比，并自动折叠 A、B 两个捕获区
+        if (textA && textB) {
+            computeAndShowDiff(textA, textB);
+            document.getElementById('copyBtn').disabled = false;
+            document.getElementById('saveBtn').disabled = false;
+            collapseSection('bodyA', 'collapseABtn', 'summaryA');
+            collapseSection('bodyB', 'collapseBBtn', 'summaryB');
+        } else {
+            document.getElementById('resultArea').style.display = 'none';
+            // 哪个空就展开哪个
+            if (!textA) expandSection('bodyA', 'collapseABtn', 'summaryA');
+            if (!textB) expandSection('bodyB', 'collapseBBtn', 'summaryB');
+        }
+    }
+
+    /* ============================================================
+       按行对比（类似 Python difflib.unified_diff）：
+       — 先按 \n 拆分成行，行级 LCS 匹配
+       — 相同行标 equal，不同行整行标 delete/insert
+       ============================================================ */
+    function lineDiff(textA, textB) {
+        var linesA = textA.split('\n');
+        var linesB = textB.split('\n');
+        var lenA = linesA.length, lenB = linesB.length;
+
+        // 行级 LCS 矩阵
+        var C = [];
+        for (var i = 0; i <= lenA; i++) { C[i] = []; for (var j = 0; j <= lenB; j++) C[i][j] = 0; }
+        for (var i = 1; i <= lenA; i++)
+            for (var j = 1; j <= lenB; j++)
+                C[i][j] = (linesA[i-1] === linesB[j-1]) ? C[i-1][j-1] + 1 : Math.max(C[i-1][j], C[i][j-1]);
+
+        // 回溯 → 行级 ops（不含 \n）
+        var rawOps = [];
+        var i = lenA, j = lenB;
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && linesA[i-1] === linesB[j-1]) {
+                rawOps.unshift({ type: 'equal', text: linesA[i-1], aIdx: i-1, bIdx: j-1 });
+                i--; j--;
+            } else if (j > 0 && (i === 0 || C[i][j-1] >= C[i-1][j])) {
+                rawOps.unshift({ type: 'insert', text: linesB[j-1], bIdx: j-1 });
+                j--;
+            } else {
+                rawOps.unshift({ type: 'delete', text: linesA[i-1], aIdx: i-1 });
+                i--;
+            }
+        }
+
+        // 补充 \n（根据各行在原文本中的位置）
+        var ops = [];
+        function pushOp(type, text) {
+            if (!text) return;
+            var last = ops.length > 0 ? ops[ops.length - 1] : null;
+            if (last && last.type === type) { last.text += text; }
+            else { ops.push({ type: type, text: text }); }
+        }
+        for (var k = 0; k < rawOps.length; k++) {
+            var op = rawOps[k];
+            if (op.type === 'equal') {
+                var aHas = op.aIdx < lenA - 1;
+                var bHas = op.bIdx < lenB - 1;
+                if (aHas && bHas) { pushOp('equal', op.text + '\n'); }
+                else if (aHas)    { pushOp('equal', op.text); pushOp('delete', '\n'); }
+                else if (bHas)    { pushOp('equal', op.text); pushOp('insert', '\n'); }
+                else              { pushOp('equal', op.text); }
+            } else if (op.type === 'insert') {
+                pushOp('insert', op.text + (op.bIdx < lenB - 1 ? '\n' : ''));
+            } else {
+                pushOp('delete', op.text + (op.aIdx < lenA - 1 ? '\n' : ''));
+            }
+        }
+        return ops;
+    }
+
+    /* ============================================================
+       分级回溯 diff（借鉴 ktbl-word-compare 思路）：
+       — 段落级 LCS 匹配：先按 \n 切段，对齐段结构
+       — 句子级 LCS 匹配：匹配段落内按句子再对齐
+       — 词级 diff：匹配句子内做精细字符比对
+       — 回溯：段落匹配不佳时，跨段重新按句子匹配
+       ============================================================ */
+    function hierarchicalDiff(textA, textB) {
+        if (!textA && !textB) return [];
+        if (!textA) return [{ type: 'insert', text: textB }];
+        if (!textB) return [{ type: 'delete', text: textA }];
+
+        // ---- Level 1: 段落匹配 ----
+        var linesA = textA.split('\n');
+        var linesB = textB.split('\n');
+        var lenA = linesA.length, lenB = linesB.length;
+
+        // 段落级 LCS
+        var C = [];
+        for (var i = 0; i <= lenA; i++) { C[i] = []; for (var j = 0; j <= lenB; j++) C[i][j] = 0; }
+        for (var i2 = 1; i2 <= lenA; i2++)
+            for (var j2 = 1; j2 <= lenB; j2++)
+                C[i2][j2] = (linesA[i2-1] === linesB[j2-1]) ? C[i2-1][j2-1] + 1 : Math.max(C[i2-1][j2], C[i2][j2-1]);
+
+        // 回溯段落级 LCS → 段落操作
+        var paraOps = [];
+        var pi = lenA, pj = lenB;
+        while (pi > 0 || pj > 0) {
+            if (pi > 0 && pj > 0 && linesA[pi-1] === linesB[pj-1]) {
+                paraOps.unshift({ type: 'equal', aIdx: pi-1, bIdx: pj-1, textA: linesA[pi-1], textB: linesB[pj-1] });
+                pi--; pj--;
+            } else if (pj > 0 && (pi === 0 || C[pi][pj-1] >= C[pi-1][pj])) {
+                paraOps.unshift({ type: 'insert', bIdx: pj-1, text: linesB[pj-1] });
+                pj--;
+            } else {
+                paraOps.unshift({ type: 'delete', aIdx: pi-1, text: linesA[pi-1] });
+                pi--;
+            }
+        }
+
+        // ---- Level 2 & 3: 段落内分级 ----
+        var result = [];
+
+        function pushResult(type, text) {
+            if (!text && text !== '') return;
+            var last = result.length > 0 ? result[result.length - 1] : null;
+            if (last && last.type === type) { last.text += text; }
+            else { result.push({ type: type, text: text }); }
+        }
+
+        // 句子分割函数
+        function splitSentences(str) {
+            if (!str) return [''];
+            // 按中英文句子分隔符切分，保留分隔符跟在句子后
+            var parts = [];
+            var buf = '';
+            for (var k = 0; k < str.length; k++) {
+                var ch = str.charAt(k);
+                buf += ch;
+                if (ch === '。' || ch === '！' || ch === '？' || ch === '；' ||
+                    ch === ';'  || ch === '?'  || ch === '!'  ||
+                    (ch === '.' && (k+1 >= str.length || str.charAt(k+1) === ' ' || str.charAt(k+1) === '\n'))) {
+                    parts.push(buf);
+                    buf = '';
+                }
+            }
+            if (buf) parts.push(buf);
+            // 合并太短的片段（<4字符）到前一个
+            var merged = [];
+            for (var m = 0; m < parts.length; m++) {
+                if (merged.length > 0 && parts[m].length < 4) {
+                    merged[merged.length - 1] += parts[m];
+                } else {
+                    merged.push(parts[m]);
+                }
+            }
+            return merged;
+        }
+
+        // 段落相似度计算（简单的编辑距离比率，用于回溯判断）
+        function similarity(s1, s2) {
+            if (!s1 && !s2) return 1.0;
+            if (!s1 || !s2) return 0.0;
+            var l1 = s1.length, l2 = s2.length;
+            var maxLen = Math.max(l1, l2);
+            if (maxLen === 0) return 1.0;
+            // 快速计算 LCS 长度
+            var dp = [];
+            for (var ii = 0; ii <= l1; ii++) { dp[ii] = []; dp[ii][0] = 0; }
+            for (var jj = 0; jj <= l2; jj++) dp[0][jj] = 0;
+            for (var ii = 1; ii <= l1; ii++) {
+                for (var jj = 1; jj <= l2; jj++) {
+                    dp[ii][jj] = (s1.charAt(ii-1) === s2.charAt(jj-1)) ? dp[ii-1][jj-1] + 1 : Math.max(dp[ii-1][jj], dp[ii][jj-1]);
+                }
+            }
+            return dp[l1][l2] / maxLen;
+        }
+
+        // 句子级 LCS diff（对两个段落内容进行句子级对比）
+        function sentenceLevelDiff(paraA, paraB) {
+            var sentA = splitSentences(paraA);
+            var sentB = splitSentences(paraB);
+
+            // 如果句子太少，直接退化为字符级 diff
+            if (sentA.length <= 1 && sentB.length <= 1) {
+                return charDiff(paraA, paraB);
+            }
+
+            var sa = sentA.length, sb = sentB.length;
+            var cs = [];
+            for (var ii = 0; ii <= sa; ii++) { cs[ii] = []; for (var jj = 0; jj <= sb; jj++) cs[ii][jj] = 0; }
+            for (var ii = 1; ii <= sa; ii++)
+                for (var jj = 1; jj <= sb; jj++)
+                    cs[ii][jj] = (sentA[ii-1] === sentB[jj-1]) ? cs[ii-1][jj-1] + 1 : Math.max(cs[ii-1][jj], cs[ii][jj-1]);
+
+            var sOps = [];
+            var si = sa, sj = sb;
+            while (si > 0 || sj > 0) {
+                if (si > 0 && sj > 0 && sentA[si-1] === sentB[sj-1]) {
+                    sOps.unshift({ type: 'equal', text: sentA[si-1] });
+                    si--; sj--;
+                } else if (sj > 0 && (si === 0 || cs[si][sj-1] >= cs[si-1][sj])) {
+                    sOps.unshift({ type: 'insert', text: sentB[sj-1] });
+                    sj--;
+                } else {
+                    sOps.unshift({ type: 'delete', text: sentA[si-1] });
+                    si--;
+                }
+            }
+
+            // 对已匹配但内容不同的句子，做词级 diff
+            var sResult = [];
+            for (var t = 0; t < sOps.length; t++) {
+                var sop = sOps[t];
+                if (sop.type === 'equal') {
+                    sResult.push(sop);
+                } else if (sop.type === 'delete') {
+                    // 检查下一个是不是 insert（可能是修改而非纯删除）
+                    if (t + 1 < sOps.length && sOps[t+1].type === 'insert') {
+                        var nextOp = sOps[t+1];
+                        var sim = similarity(sop.text, nextOp.text);
+                        // 相似度高 → 认为是对同一句子的修改，做字符级 diff
+                        if (sim > 0.3) {
+                            var charOps = charDiff(sop.text, nextOp.text);
+                            for (var cc = 0; cc < charOps.length; cc++) {
+                                sResult.push(charOps[cc]);
+                            }
+                            t++; // 跳过 nextOp
+                        } else {
+                            sResult.push(sop);
+                        }
+                    } else {
+                        sResult.push(sop);
+                    }
+                } else { // insert
+                    // 检查下一个是不是 delete（也可能是修改）
+                    if (t + 1 < sOps.length && sOps[t+1].type === 'delete') {
+                        var nextOp2 = sOps[t+1];
+                        var sim2 = similarity(sop.text, nextOp2.text);
+                        if (sim2 > 0.3) {
+                            var charOps2 = charDiff(nextOp2.text, sop.text);
+                            for (var cc2 = 0; cc2 < charOps2.length; cc2++) {
+                                sResult.push(charOps2[cc2]);
+                            }
+                            t++;
+                        } else {
+                            sResult.push(sop);
+                        }
+                    } else {
+                        sResult.push(sop);
+                    }
+                }
+            }
+            return sResult;
+        }
+
+        // ---- 组装最终结果 ----
+        for (var k = 0; k < paraOps.length; k++) {
+            var op = paraOps[k];
+            if (op.type === 'equal') {
+                var aHasNL = op.aIdx < lenA - 1;
+                var bHasNL = op.bIdx < lenB - 1;
+
+                if (aHasNL || bHasNL) {
+                    // 段落匹配但需要追加换行 → 先用句子级对比内容，再补换行
+                    if (op.textA !== op.textB) {
+                        var subOps = sentenceLevelDiff(op.textA, op.textB);
+                        for (var s = 0; s < subOps.length; s++) {
+                            pushResult(subOps[s].type, subOps[s].text);
+                        }
+                    } else {
+                        pushResult('equal', op.textA);
+                    }
+                    // 追加换行
+                    if (aHasNL && bHasNL) { pushResult('equal', '\n'); }
+                    else if (aHasNL)      { pushResult('delete', '\n'); }
+                    else if (bHasNL)      { pushResult('insert', '\n'); }
+                } else {
+                    // 最后一行，如果不同也要对比
+                    if (op.textA !== op.textB) {
+                        var subOps2 = sentenceLevelDiff(op.textA, op.textB);
+                        for (var s2 = 0; s2 < subOps2.length; s2++) {
+                            pushResult(subOps2[s2].type, subOps2[s2].text);
+                        }
+                    } else {
+                        pushResult('equal', op.textA);
+                    }
+                }
+            } else if (op.type === 'insert') {
+                pushResult('insert', op.text + (op.bIdx < lenB - 1 ? '\n' : ''));
+            } else { // delete
+                pushResult('delete', op.text + (op.aIdx < lenA - 1 ? '\n' : ''));
+            }
+        }
+
+        // ---- 回溯优化：合并段级操作中相邻 delete+insert 为字符级 diff（对整段不匹配的情况） ----
+        // 已在上面的 sentenceLevelDiff 中处理了段落匹配但内容不同的情况
+        // 这里对连续的 delete+insert+delete+insert... 段落做回溯重匹配
+        var refined = [];
+        var diGroups = [];   // 连续的 delete/insert 组
+        
+        for (var r = 0; r < result.length; r++) {
+            if (result[r].type === 'delete' || result[r].type === 'insert') {
+                diGroups.push(result[r]);
+            } else {
+                if (diGroups.length > 0) {
+                    refined = refined.concat(backtrackMerge(diGroups));
+                    diGroups = [];
+                }
+                refined.push(result[r]);
+            }
+        }
+        if (diGroups.length > 0) {
+            refined = refined.concat(backtrackMerge(diGroups));
+        }
+
+        return refined;
+    }
+
+    // 回溯合并：对连续的 delete/insert 段，按相似度跨段重新匹配
+    function backtrackMerge(ops) {
+        if (ops.length < 2) return ops;
+        // 提取 delete 和 insert 列表
+        var dels = [];
+        var inss = [];
+        for (var i = 0; i < ops.length; i++) {
+            if (ops[i].type === 'delete') dels.push({ idx: i, text: ops[i].text });
+            else inss.push({ idx: i, text: ops[i].text });
+        }
+        if (dels.length === 0 || inss.length === 0) return ops;
+
+        // 对每个 delete 找最相似的 insert，且两者的文本都不是纯换行
+        var used = {}; // 记录哪些 insert 已被匹配
+        var out = [];
+        var di = 0, ii = 0;
+        while (di < dels.length && ii < inss.length) {
+            var d = dels[di];
+            var s = inss[ii];
+            // 跳过纯换行差异
+            if (d.text === '\n' && s.text === '\n') {
+                out.push({ type: 'equal', text: '\n' });
+                di++; ii++;
+                continue;
+            }
+            if (d.text === '\n') { out.push({ type: 'delete', text: '\n' }); di++; continue; }
+            if (s.text === '\n') { out.push({ type: 'insert', text: '\n' }); ii++; continue; }
+
+            var sim = similarity(d.text, s.text);
+            if (sim > 0.4) {
+                // 相似度高 → 字符级 diff
+                var charOps = charDiff(d.text, s.text);
+                for (var c = 0; c < charOps.length; c++) {
+                    out.push(charOps[c]);
+                }
+                di++; ii++;
+            } else {
+                // 找剩余 insert 中最相似的
+                var bestSim = sim, bestJ = ii;
+                for (var j = ii + 1; j < inss.length; j++) {
+                    if (used[j]) continue;
+                    var js = similarity(d.text, inss[j].text);
+                    if (js > bestSim) { bestSim = js; bestJ = j; }
+                }
+                if (bestSim > 0.4 && bestJ !== ii) {
+                    // 重新匹配：先输出被跳过的 insert
+                    for (var z = ii; z < bestJ; z++) {
+                        out.push({ type: 'insert', text: inss[z].text });
+                    }
+                    var charOps2 = charDiff(d.text, inss[bestJ].text);
+                    for (var c2 = 0; c2 < charOps2.length; c2++) {
+                        out.push(charOps2[c2]);
+                    }
+                    used[bestJ] = true;
+                    di++;
+                    ii = bestJ + 1;
+                } else {
+                    out.push({ type: 'delete', text: d.text });
+                    di++;
+                }
+            }
+        }
+        // 剩余未处理的
+        while (di < dels.length) { out.push({ type: 'delete', text: dels[di].text }); di++; }
+        while (ii < inss.length) { out.push({ type: 'insert', text: inss[ii].text }); ii++; }
+        return out;
+    }
+
+    /* ============================================================
+       贪心锚定递归 diff：
+       — 先找长连续匹配块作锚点切分文档
+       — 找不到连续锚点就不再硬凑，直接标 delete/insert
+       — 只在短片段（<2*ANCHOR_MIN）上才用字符级 diff 做精细标注
+       ============================================================ */
+    var ANCHOR_MIN = 8; // 最少连续 8 个字符才算有效锚点
+
+    function alignAndDiff(textA, textB) {
+        if (!textA && !textB) return [];
+        if (!textA) return [{ type: 'insert', text: textB }];
+        if (!textB) return [{ type: 'delete', text: textA }];
+
+        var la = textA.length, lb = textB.length;
+
+        // 短片段 → 直接字符 diff（片段短，不会乱窜）
+        var SHORT = ANCHOR_MIN * 2;
+        if (la < SHORT && lb < SHORT) {
+            return charDiff(textA, textB);
+        }
+
+        // ① 在 textA 中找 textB 开头的最长连续匹配
+        var match = _findPrefixInTarget(textB, textA, ANCHOR_MIN);
+        if (match) {
+            var aBefore = textA.substring(0, match.pos);
+            var aAfter  = textA.substring(match.pos + match.len);
+            var bAfter  = textB.substring(match.len);
+            var eqText  = textB.substring(0, match.len);
+
+            var right = alignAndDiff(aAfter, bAfter);
+            var out = [];
+            if (aBefore) out.push({ type: 'delete', text: aBefore });
+            out.push({ type: 'equal', text: eqText });
+            return out.concat(right);
+        }
+
+        // ② 反向：在 textB 中找 textA 开头的最长连续匹配
+        match = _findPrefixInTarget(textA, textB, ANCHOR_MIN);
+        if (match) {
+            var bBefore = textB.substring(0, match.pos);
+            var bAfter  = textB.substring(match.pos + match.len);
+            var aAfter  = textA.substring(match.len);
+            var eqText  = textA.substring(0, match.len);
+
+            var right = alignAndDiff(aAfter, bAfter);
+            var out = [];
+            if (bBefore) out.push({ type: 'insert', text: bBefore });
+            out.push({ type: 'equal', text: eqText });
+            return out.concat(right);
+        }
+
+        // ③ 两侧都不是前缀匹配 → 在 textB 中密集扫描找锚点
+        match = _findAnyAnchor(textA, textB, ANCHOR_MIN);
+        if (match) {
+            var aLeft  = textA.substring(0, match.aPos);
+            var aRight = textA.substring(match.aPos + match.len);
+            var bLeft  = textB.substring(0, match.bPos);
+            var bRight = textB.substring(match.bPos + match.len);
+            var eqText = textB.substring(match.bPos, match.bPos + match.len);
+
+            var leftOps  = alignAndDiff(aLeft, bLeft);
+            var rightOps = alignAndDiff(aRight, bRight);
+            return leftOps.concat([{ type: 'equal', text: eqText }]).concat(rightOps);
+        }
+
+        // ④ 完全找不到连续锚点 → 如果两段长度相近，说明很可能是相似内容（如「主要」vs「重要」），
+        //    必须用 charDiff 逐一对比，不能粗暴跳过；只有长度悬殊才是真正无关的段落
+        if (la > 0 && lb > 0 && Math.max(la, lb) / Math.min(la, lb) <= 3) {
+            return charDiff(textA, textB);
+        }
+        var ops = [];
+        if (textA) ops.push({ type: 'delete', text: textA });
+        if (textB) ops.push({ type: 'insert', text: textB });
+        return ops;
+    }
+
+    var MAX_ANCHOR = 300;
+
+    // 归一化空白：把各类空白（空格/制表/换行）统一成单个空格，便于跨格式匹配
+    function _normSpace(s) {
+        return s.replace(/\s+/g, ' ');
+    }
+
+    // 在 target 中找 source 开头的最长连续子串（先归一化空白再匹配）
+    function _findPrefixInTarget(source, target, minLen) {
+        var normSource = _normSpace(source);
+        var normTarget = _normSpace(target);
+        var maxCheck = Math.min(normSource.length, MAX_ANCHOR);
+        for (var len = maxCheck; len >= minLen; len--) {
+            var sub = normSource.substring(0, len);
+            var pos = normTarget.indexOf(sub);
+            if (pos >= 0) {
+                var rawPos = _mapNormToRaw(target, pos);
+                return { pos: rawPos, len: len };
+            }
+        }
+        return null;
+    }
+
+    // 密集扫描 textB 中任意位置在 textA 的最长连续匹配
+    function _findAnyAnchor(textA, textB, minLen) {
+        var normA = _normSpace(textA);
+        var normB = _normSpace(textB);
+        var best = null;
+        var numSamples = 25;
+        var step = Math.max(1, Math.floor(normB.length / numSamples));
+
+        for (var start = 0; start < normB.length; start += step) {
+            var maxCheck = Math.min(MAX_ANCHOR, normB.length - start);
+            for (var len = maxCheck; len >= minLen; len--) {
+                var sub = normB.substring(start, start + len);
+                var pos = normA.indexOf(sub);
+                if (pos >= 0) {
+                    if (!best || len > best.len) {
+                        best = { aPos: _mapNormToRaw(textA, pos), bPos: _mapNormToRaw(textB, start), len: len };
+                    }
+                    break;
+                }
+            }
+        }
+        return best;
+    }
+
+    // 把归一化字符串的索引映射回原始字符串索引
+    function _mapNormToRaw(raw, normIdx) {
+        var rawIdx = 0;
+        var normCount = 0;
+        while (rawIdx < raw.length && normCount < normIdx) {
+            if (/\s/.test(raw[rawIdx])) {
+                normCount++;
+                while (rawIdx < raw.length && /\s/.test(raw[rawIdx])) rawIdx++;
+            } else {
+                normCount++;
+                rawIdx++;
+            }
+        }
+        return rawIdx;
+    }
+
+    /* ============================================================
+       文本标准化：消除不可见字符差异，减少 diff 错误拆分
+       ============================================================ */
+    function normalizeText(s) {
+        if (!s) return '';
+        return s
+            .replace(/\r\n/g, '\n').replace(/\r/g, '\n')   // 统一换行符
+            .replace(/[\u00A0\u2000-\u200B\u3000]/g, ' ')    // 各种空白统一为空格
+            .replace(/[ \t]+/g, ' ')                        // 连续空格合并
+            .trim();
+    }
+
+    function computeAndShowDiff(rawA, rawB) {
+        rawA = rawA == null ? '' : String(rawA);
+        rawB = rawB == null ? '' : String(rawB);
+        var textA = normalizeText(rawA);
+        var textB = normalizeText(rawB);
+
+        /* ================================================================
+           ⚠️ 不再改写 previewA/previewB 的 value：用户粘贴的原文保留在
+           textarea 里，这样右上角 A/B 两个『定位』按钮、手动选区、光标位置、
+           粘贴回调……都和从前完全一致，不会失效。
+
+           用一套"标准化 ↔ 原文"字符映射 gPosMaps 来做换算：
+             - diff / extractCommonSequences 仍然用标准化 textA/textB 计算（
+               好处是 CRLF/TAB/多余空白不会破坏公共子序列配对）
+             - 清单里的 aPos/bPos/length 仍是"标准化下标"
+             - locateSequence 把 norm 下标通过 gPosMaps.ntr 换算成 textarea 原文
+               的下标，再 setSelectionRange。
+           ================================================================ */
+        gPosMaps.a = buildRawNormMap(rawA, textA);
+        gPosMaps.b = buildRawNormMap(rawB, textB);
+
+        if (textA === textB) {
+            document.getElementById('resultArea').style.display = 'block';
+            document.getElementById('diffContent').innerHTML =
+                '<span style="color:#888; font-style:italic;">两个段落完全相同，没有差异。</span>';
+            document.getElementById('resultStats').innerHTML = '无差异';
+            document.getElementById('jumpCounter').textContent = '- / -';
+            gChunkCount = 0; gActiveChunk = -1;
+            gDiffOps = [];  // 清空 diff 数据
+            gNumberChanges = [];  // 清空公共子序列清单
+            renderNumberChanges(gNumberChanges);
+            setStatus('两个段落完全相同', 'status-info');
+            return;
+        }
+
+        // 根据当前选择的算法执行 diff
+        var rawOps;
+        if (gDiffAlgo === 'classic')      rawOps = charDiff(textA, textB);
+        else if (gDiffAlgo === 'line')    rawOps = lineDiff(textA, textB);
+        else if (gDiffAlgo === 'hier')    rawOps = hierarchicalDiff(textA, textB);
+        else                              rawOps = alignAndDiff(textA, textB);
+        gDiffOps = rawOps;                 // 保存原始 ops 供 DOCX 导出（不再吞并匹配块）
+        var resultFull = renderDiff(rawOps);  // 用完整数据算统计
+
+        // 提取公共子序列清单 — 不用 alignAndDiff 的 rawOps 位置（token切分导致位置错），
+        // 而是：从 rawOps 取 equal 段文本 + 粗略位置后，
+        // 在 textA/textB 中精确查找相同文本，用精确查找结果作为真实位置。
+        var debugInfo = '';
+        try {
+            gNumberChanges = extractCommonSequences(textA, textB, rawOps);
+            debugInfo = ' 公共子序列(≥20):' + gNumberChanges.length + ' 段';
+        } catch(e) {
+            gNumberChanges = [];
+            debugInfo = ' 公共子序列提取出错: ' + (e.message || e);
+            console.error('extractCommonSequences error:', e);
+        }
+        renderNumberChanges(gNumberChanges);
+
+        var jumpBar = document.querySelector('.jump-bar');
+        if (gViewMode === 'clean') {
+            // 仅显示新文本：直接以 textB 为底本，ops 只用于标记新增字符绿色高亮
+            var cleanResult = renderClean(textB, rawOps);
+            document.getElementById('diffContent').innerHTML = cleanResult.html;
+            document.getElementById('resultStats').innerHTML =
+                '<span class="ins-count">新增 ' + resultFull.insTotal + ' 字符</span>';
+            document.getElementById('resultArea').style.display = 'block';
+            jumpBar.style.display = 'none';   // 无差异块可跳转
+            gChunkCount = 0; gActiveChunk = -1;
+            document.getElementById('jumpCounter').textContent = '- / -';
+            setStatus('已切换为「仅显示新文本」模式，绿色高亮为新增内容。' + debugInfo, 'status-ok');
+        } else {
+            // 标准差异视图
+            var displayOps = collapseLongOps(rawOps);
+            var result = renderDiff(displayOps);
+            document.getElementById('diffContent').innerHTML = result.html;
+            document.getElementById('resultStats').innerHTML =
+                '<span class="del-count">删除 ' + resultFull.delTotal + ' 字符</span> &nbsp; ' +
+                '<span class="ins-count">新增 ' + resultFull.insTotal + ' 字符</span>';
+            document.getElementById('resultArea').style.display = 'block';
+            jumpBar.style.display = 'flex';   // 恢复跳转栏
+
+            // 初始化跳转状态
+            gChunkCount = result.chunkCount;
+            gActiveChunk = -1;
+            document.getElementById('jumpCounter').textContent = '- / ' + gChunkCount;
+
+            // 对比完成后，按"自动打开"记忆展开/折叠对比结果
+            try {
+                var cb = document.getElementById('autoOpenResult');
+                if (cb) {
+                    var bodyResult = document.getElementById('bodyResult');
+                    var expanded = !bodyResult.classList.contains('collapsed');
+                    if (cb.checked !== expanded) {
+                        toggleSection('bodyResult', 'collapseResultBtn', null);
+                    }
+                }
+            } catch(_) {}
+
+            setStatus('对比完成：删除 ' + resultFull.delTotal + ' 字符，新增 ' + resultFull.insTotal + ' 字符（共 ' + gChunkCount + ' 处差异）。' + debugInfo, 'status-ok');
+        }
+    }
+
+    /* ============================================================
+       公共子序列清单提取 — 直接从 diff 的 equal 段提取
+       1. 遍历 rawOps，跟踪 A/B 位置
+       2. equal 段长度≥20 时记录
+       3. 取 equal 段后 20 个字符（在 A 和 B 中分别）
+       4. 输出：序号、公共子序列、字符数、旧文本后20字符、新文本后20字符、位置
+       ============================================================ */
+    var gNumberRe = /-?\d{1,3}(?:,\d{3})*(?:\.\d+)?%?|-?\d+(?:\.\d+)?%?/g;
+
+    // 判断文本是否为表格数据：同行内出现"数字+空格+数字+空格+数字"模式
+    var gTableRe = /\d[ \t]+\d[ \t]+\d/;
+
+    function extractCommonSequences(textA, textB, rawOps) {
+        var MIN_LEN = 20;
+        var AFTER_LEN = 100;
+        var sequences = [];
+        var diagFails = [];
+
+        // 逐条遍历 rawOps 中的 equal 段（不做任何合并），
+        // 这样每段都是 diff 算法保证的 A/B 中严格同序、内容一致的公共子串。
+        var aPos = 0, bPos = 0;
+        var aSearchFrom = 0, bSearchFrom = 0;
+
+        for (var i = 0; i < rawOps.length; i++) {
+            var op = rawOps[i];
+            var len = op.text.length;
+
+            if (op.type === 'equal' && len >= MIN_LEN) {
+                var txt = op.text;
+
+    // 插入开始：在原始文本里找到这个 equal 段的位置
+    var aStart = textA.indexOf(txt, aSearchFrom);
+    var bStart = textB.indexOf(txt, bSearchFrom);
+    var aEnd = aStart + txt.length;
+    var bEnd = bStart + txt.length;
+
+    // ✅ 真正检查：紧接着的字符是否不同
+    var charAfterA = textA.charAt(aEnd);
+    var charAfterB = textB.charAt(bEnd);
+
+    // 如果两侧都到了末尾，也算"不同"（一侧有字符一侧没有）
+    var isDifferent = charAfterA !== charAfterB;
+
+    if (!isDifferent) {
+        continue; // 后面字符相同，跳过
+    }
+
+    //插入结束： ... 提取
+
+                // 严格匹配：searchFrom 只是起点，**aStart/bStart 必须使用 indexOf 的真实返回值**，
+                // 不能再把 searchFrom 当命中位置用（前者可能比真实命中位置靠前，导致 end-start 大于 len）。
+                var aStart = textA.indexOf(txt, aSearchFrom);
+                if (aStart === -1) aStart = looseFindStart(textA, txt);
+                if (aStart === -1) {
+                    aPos += len; bPos += len;
+                    continue;
+                }
+                var aEnd = aStart + txt.length;
+
+                var bStart = textB.indexOf(txt, bSearchFrom);
+                if (bStart === -1) bStart = looseFindStart(textB, txt);
+                if (bStart === -1) {
+                    aPos += len; bPos += len;
+                    continue;
+                }
+                var bEnd = bStart + txt.length;
+
+                /* ================================================================
+                   硬校验：写入公共序列清单前，两侧切下来的字串必须 === txt，
+                   并且长度一定 === txt.length（也就是共享一个 length，保证 A/B
+                   选区大小永远一样大）。任何不一致都说明"命中了别的副本/宽松匹配
+                   不对齐"，把诊断信息累计下来在对比结束时提示。
+                   ================================================================ */
+                var cutA = textA.substring(aStart, aEnd);
+                var cutB = textB.substring(bStart, bEnd);
+                var okA = (cutA === txt);
+                var okB = (cutB === txt);
+                var lenEq = (aEnd - aStart === txt.length) && (bEnd - bStart === txt.length);
+                if (!okA || !okB || !lenEq) {
+                    diagFails.push('#' + (sequences.length + 1)
+                        + ' A[' + aStart + ',' + aEnd + ']=' + (cutA.length) + 'B[' + bStart + ',' + bEnd + ']=' + (cutB.length)
+                        + ' txt=' + txt.length);
+                    aSearchFrom = aEnd; bSearchFrom = bEnd;
+                    aPos += len; bPos += len;
+                    continue;
+                }
+
+                var afterA = textA.substring(aEnd, aEnd + AFTER_LEN);
+                var afterB = textB.substring(bEnd, bEnd + AFTER_LEN);
+
+                sequences.push({
+                    text: txt,
+                    length: txt.length,
+                    afterA: afterA,
+                    afterB: afterB,
+                    aPos: aStart,
+                    bPos: bStart,
+                    aEnd: aEnd,
+                    bEnd: bEnd
+                });
+                aSearchFrom = aEnd;
+                bSearchFrom = bEnd;
+                aPos += len; bPos += len;
+            } else if (op.type === 'equal') {
+                aPos += len; bPos += len;
+            } else if (op.type === 'delete') {
+                aPos += len;
+            } else if (op.type === 'insert') {
+                bPos += len;
+            }
+        }
+
+        // 如果有被剔除的"命中别的副本/不对齐"，在状态栏留一次诊断（不弹窗不打断流程）。
+        if (diagFails.length > 0 && typeof setStatus === 'function') {
+            setStatus('公共子序列共剔除 ' + diagFails.length + ' 条不一致配对（A/B 两端命中的副本长度不同/内容不同）：' + diagFails.slice(0, 5).join('；'), 'status-err');
+        }
+        return sequences;
+    }
+
+    /* 极简宽松定位：TAB、空格、多空格都等价
+       返回 {start, end}，失败返回 null */
+    function looseFind(haystack, needle) {
+        // 去掉所有空白字符（空格32、TAB9）后比较，
+        // 再通过"非空白索引映射"还原真实 start/end
+        var hClean = '';
+        var hMap = []; // hClean[i] 在 haystack 中的索引
+        for (var i = 0; i < haystack.length; i++) {
+            var c = haystack.charCodeAt(i);
+            if (c !== 32 && c !== 9) {
+                hClean += haystack.charAt(i);
+                hMap.push(i);
+            }
+        }
+        var nClean = '';
+        for (var j = 0; j < needle.length; j++) {
+            var d = needle.charCodeAt(j);
+            if (d !== 32 && d !== 9) {
+                nClean += needle.charAt(j);
+            }
+        }
+        if (!nClean.length) return null;
+        var cStart = hClean.indexOf(nClean);
+        if (cStart === -1) return null;
+        var cEnd = cStart + nClean.length;
+        // start：第一个非空白字符在 haystack 中的位置，
+        // 再往前跳过 needle 开头的所有空白（保留开头空白使选区更自然）
+        var realFirst = hMap[cStart];
+        // 计算 needle 自身开头有几个空白
+        var nHeadWs = 0;
+        for (var k = 0; k < needle.length; k++) {
+            var code = needle.charCodeAt(k);
+            if (code === 32 || code === 9) nHeadWs++; else break;
+        }
+        var start = Math.max(0, realFirst - nHeadWs);
+        // end：最后一个非空白字符在 haystack 中的位置 + 1，再加上 needle 末尾的空白
+        var nTailWs = 0;
+        for (var m = needle.length - 1; m >= 0; m--) {
+            var code2 = needle.charCodeAt(m);
+            if (code2 === 32 || code2 === 9) nTailWs++; else break;
+        }
+        var realLast = hMap[cEnd - 1];
+        var end = realLast + 1 + nTailWs;
+        return { start: start, end: end };
+    }
+
+    function looseFindStart(haystack, needle) {
+        var r = looseFind(haystack, needle);
+        return r ? r.start : -1;
+    }
+
+    /* ============================================================
+       渲染公共子序列清单到表格
+       ============================================================ */
+    function renderNumberChanges(sequences) {
+        var container = document.getElementById('numberChanges');
+        var body = document.getElementById('numberChangesBody');
+        var countEl = document.getElementById('numberChangesCount');
+        if (!container || !body || !countEl) return;
+
+        if (!sequences || sequences.length === 0) {
+            countEl.textContent = '未检测到';
+            body.innerHTML = '<tr><td colspan="7" class="number-changes-empty">未检测到公共子序列（≥20字符）</td></tr>';
+            return;
+        }
+
+        countEl.textContent = '共 ' + sequences.length + ' 段';
+        var html = '';
+        for (var i = 0; i < sequences.length; i++) {
+            var s = sequences[i];
+            // 公共子序列显示：前30字符 + … + 后30字符（两头都能看清，对应开头结尾的定位）
+            var displayText = s.text;
+            if (displayText.length > 65) {
+                displayText = displayText.substring(0, 30) + '…' + displayText.substring(displayText.length - 30);
+            }
+            // 后100字符中的换行符替换为 ↵ 便于显示
+            var afterA = (s.afterA || '').replace(/\n/g, '↵').replace(/\t/g, '→');
+            var afterB = (s.afterB || '').replace(/\n/g, '↵').replace(/\t/g, '→');
+            html += '<tr>' +
+                '<td class="col-idx">' + (i + 1) + '</td>' +
+                '<td class="col-seq" title="' + htmlEscape(s.text) + '">' + htmlEscape(displayText) + '</td>' +
+                '<td class="col-len">' + s.length + '</td>' +
+                '<td class="col-after-a"><div class="cell-clamp">' + htmlEscape(afterA) + '</div></td>' +
+                '<td class="col-after-b"><div class="cell-clamp">' + htmlEscape(afterB) + '</div></td>' +
+                '<td class="col-pos">' + s.aEnd + '|' + s.bEnd + '</td>' +
+                '<td class="col-loc" style="padding:1px 0;line-height:1;">' +
+                    '<a class="loc-btn loc-a" data-idx="' + i + '" data-side="a" title="在 A 中定位" style="display:block;width:18px;height:14px;line-height:12px;margin:1px auto 0;font-size:9px;padding:0;">A</a>' +
+                    '<a class="loc-btn loc-b" data-idx="' + i + '" data-side="b" title="在 B 中定位" style="display:block;width:18px;height:14px;line-height:12px;margin:0 auto 1px;font-size:9px;padding:0;">B</a>' +
+                '</td>' +
+                '</tr>';
+        }
+        body.innerHTML = html;
+    }
+
+    /* ============================================================
+       让 textarea 当前选区的「第一个字符 = 文本框可视区第一行（顶着上边）」。
+
+       算法（一步到位，不做"居中/偏上"插值，避免每次出来都偏下）：
+         1) scrollTop = 0         — 先确定性回到文档顶
+         2) setSelectionRange(start, start) + focus()
+              → 浏览器会把"选区起点所在行"滚到"至少可见，而且通常正好停在
+                 可视区最顶第一行 / 顶 1~2 行"的位置
+              → 此时 anchor = ta.scrollTop 正好代表"把起点行露到最顶那一行
+                 （贴着上边框）"时需要的容器 scrollTop
+         3) target = anchor - tinyCompensate
+              多数浏览器 focus 后"起点行"会略低 0.5~1 行（让该行上下都留一点白），
+              这里向上回退约 0.25 行，保证真正"顶着上边"。
+         4) clamp [0, scrollHeight-clientHeight]
+       ============================================================ */
+    function scrollCurrentSelectionToNearBottom(ta) {
+        if (!ta) return;
+        var start = ta.selectionStart;
+        var end = ta.selectionEnd;
+        if (start == null || end == null) return;
+        if (start === end) return;
+
+        var cs = getComputedStyle(ta);
+        var lineHeight = parseFloat(cs.lineHeight);
+        if (!lineHeight || isNaN(lineHeight)) lineHeight = parseFloat(cs.fontSize) * 1.4 || 18;
+        var clientH = ta.clientHeight;
+        var maxScroll = Math.max(0, ta.scrollHeight - clientH);
+
+        // 锚点：先回文档最顶，再把 focus 交给选区起点 → 浏览器把"起点行"送到最顶第一行。
+        ta.scrollTop = 0;
+        ta.setSelectionRange(start, start);
+        try { ta.focus(); } catch (e) {}
+        var anchor = ta.scrollTop;
+
+        // 抵消 focus 默认的"起点行略高于最顶第一行"，把它顶到真正贴上边框的位置。
+        var compensateTopPx = lineHeight * 0.25;
+        var target = anchor - compensateTopPx;
+        if (target < 0) target = 0;
+        if (target > maxScroll) target = maxScroll;
+
+        ta.setSelectionRange(start, end);
+        ta.scrollTop = target;
+    }
+
+    /* ============================================================
+       定位公共子序列到 A 或 B 的 textarea。
+
+       ⚠️ 最终执行流 = 右上角 A/B 面板头『定位』按钮的最后三句：
+           ① ta.setSelectionRange(start, end)
+           ② scrollCurrentSelectionToNearBottom(ta)   // 首字贴第一行
+           ③ ta.focus()
+       用户明确要求：数字面板行内 A/B、⏮最前/◀上/★当前/下▶/最后⏭
+       全部要走同一套三句，不做 setTimeout / focus(false) / 强刷 mirror。
+       ============================================================ */
+    function locateSequence(idx, side /*, opts (保留原调用签名兼容，不再改流) */) {
+        var s = gNumberChanges[idx];
+        if (!s) return;
+
+        // 1) 定位按钮必须 A/B 同时展开，否则没法看到两边的定位上下文
+        expandSection('bodyA', 'collapseABtn', 'summaryA');
+        expandSection('bodyB', 'collapseBBtn', 'summaryB');
+
+        var taId = side === 'a' ? 'previewA' : 'previewB';
+        var ta = document.getElementById(taId);
+        if (!ta) return;
+
+        var fullText = ta.value;   // textarea 里的原文（保留 CRLF/TAB/连续空白/首尾 trim 前字符）
+        var txt = s.text;         // 公共子序列 = diff 时 normalizeText 子串
+        var normStart = (side === 'a') ? (s.aPos != null ? s.aPos : -1) : (s.bPos != null ? s.bPos : -1);
+        var normLen   = s.length != null ? s.length : (txt ? txt.length : 0);
+
+        /* ==================================================================
+           定位流程：norm 下标 → 原文下标，然后 setSelectionRange。
+           因为：
+             · s.aPos / s.bPos / normLen 是 diff / extractCommonSequences 在
+               normalizeText(raw) 上算的
+             · fullText (ta.value) 是用户粘贴原文
+           所以中间必须用 gPosMaps[side].ntr 做一次"标准化下标 → 原文下标"换算。
+           这样 textarea 完全不被改写 → 右上角『A 定位 / B 定位』按钮就不会受影响。
+
+           ✗ 仍然不允许的回退：
+               ✗ fullText.indexOf(txt)            // 从 0 找，会回到第一段重复副本
+               ✗ looseFind(fullText, txt)
+           ============================================================a====== */
+        var start = -1, end = -1;
+        var maps = (gPosMaps && gPosMaps[side]) ? gPosMaps[side] : null;
+        var ntr = maps ? maps.ntr : null;
+
+        /* ================================================================
+           自愈兜底：如果这份 gPosMaps 和当前 gNumberChanges 不是"同一次对比
+           出来的同源产物"（比如缓存脏了、computeAndShowDiff 是老版本跑的、
+           手动改了 textarea 没重算），就用当前 textarea 原文 + 实时
+           normalizeText 现打一份映射写回 gPosMaps[side]，再重新判断。
+
+           这样无论定位时有没有"先重算 diff"，只要 textarea 内容还在，
+           就能稳稳算出选区，不会因为映射表短一截就整段不画。
+           ================================================================ */
+        function ensureMap(curNtr, curFullText, curNeedMinLen) {
+            if (curNtr && curNtr.length >= curNeedMinLen) return curNtr;
+            try {
+                var fresh = buildRawNormMap(curFullText, normalizeText(curFullText));
+                if (gPosMaps) gPosMaps[side] = fresh;
+                return fresh.ntr;
+            } catch (e) {
+                return curNtr;
+            }
+        }
+        var needMinLen = (normLen === 0) ? Math.max(1, normStart) : (normStart + normLen);
+        if ((!ntr || ntr.length < needMinLen) && typeof buildRawNormMap === 'function') {
+            ntr = ensureMap(ntr, fullText, needMinLen);
+            maps = ntr ? { ntr: ntr } : maps;
+        }
+
+        /* —— 边界：逐项校验"真实有填"。
+           之前 buildRawNormMap 只要碰到 合并空格/TAB / trim / 特殊空格替换，
+           ntr 里就会留空槽（undefined）→ 原来的长度校验会骗我们"OK"，
+           结果 rawStart/rawLastIdx 拿到 undefined → NaN，最后整块不画选区。 */
+        var normLast = (normLen === 0) ? normStart : (normStart + normLen - 1);
+        var mapsReady = (ntr && ntr.length && normStart >= 0 && normLen >= 0
+                        && normStart <= ntr.length
+                        && normLast  <  ntr.length);
+        var rawStartIdx = mapsReady ? ntr[normStart] : undefined;
+        var rawLastIdx  = (mapsReady && normLen > 0) ? ntr[normLast] : undefined;
+        // 开区间 end：如果"该 norm 子串后面还有下一个 norm 字符"，就用下一个
+        // norm 字符对应的 raw 起点当 end，避免 rawLastIdx+1 遇到 \r\n / 合并空格
+        // 时多跨或少跨。否则就用 fullText.length（贴到 textarea 末尾也是合理的）。
+        var rawNextIdx = (mapsReady && normStart + normLen < ntr.length) ? ntr[normStart + normLen] : undefined;
+
+        var indicesOk = (rawStartIdx != null
+                        && (normLen === 0 || rawLastIdx != null)
+                        && typeof rawStartIdx === 'number' && !isNaN(rawStartIdx)
+                        && (normLen === 0 || (typeof rawLastIdx === 'number' && !isNaN(rawLastIdx))));
+        if (indicesOk) {
+            var rawStart = rawStartIdx;
+            var rawEnd;
+            if (normLen === 0) {
+                rawEnd = rawStart;
+            } else if (rawNextIdx != null && typeof rawNextIdx === 'number' && !isNaN(rawNextIdx)) {
+                rawEnd = rawNextIdx;
+            } else {
+                rawEnd = rawLastIdx + 1;
+            }
+            if (rawStart >= 0 && rawEnd <= fullText.length && rawStart <= rawEnd) {
+                var rawSub = fullText.substring(rawStart, rawEnd);
+                var rawSubNorm = normalizeText(rawSub);
+                if (rawSubNorm === txt) {
+                    start = rawStart;
+                    end = rawEnd;
+                }
+            }
+        }
+
+        // 内容校验没过？很可能就是 gPosMaps 老了——再"就地重建一次"做最后的自愈。
+        if (start === -1 && typeof buildRawNormMap === 'function') {
+            try {
+                var rebuild = buildRawNormMap(fullText, normalizeText(fullText));
+                if (gPosMaps) gPosMaps[side] = rebuild;
+                var rNtr = rebuild.ntr;
+                var rLast = (normLen === 0) ? normStart : (normStart + normLen - 1);
+                var rReady = (rNtr && rNtr.length && normStart >= 0 && normLen >= 0
+                            && normStart <= rNtr.length
+                            && rLast      <  rNtr.length);
+                if (rReady) {
+                    var rS = rNtr[normStart];
+                    var rL = (normLen > 0) ? rNtr[rLast] : null;
+                    var rN = (normStart + normLen < rNtr.length) ? rNtr[normStart + normLen] : null;
+                    var rOk = (rS != null && (normLen === 0 || rL != null));
+                    if (rOk) {
+                        var rs2 = rS, re2;
+                        if (normLen === 0) re2 = rs2;
+                        else if (rN != null) re2 = rN;
+                        else re2 = rL + 1;
+                        if (rs2 >= 0 && re2 <= fullText.length && rs2 <= re2) {
+                            var sub = fullText.substring(rs2, re2);
+                            if (normalizeText(sub) === txt) {
+                                start = rs2;
+                                end = re2;
+                            }
+                        }
+                    }
+                }
+            } catch (e2) { /* ignore rebuild error, fall back to diag */ }
+        }
+
+        if (start === -1) {
+            var diag = [];
+            diag.push((side === 'a' ? 'A' : 'B') + ' 端定位失败：公共子序列 norm→原文 映射失败。');
+            diag.push(' 清单 norm: 起点=' + normStart + ' 长度=' + normLen + ' 末位=' + normLast);
+            diag.push(' norm→raw 映射表长度=' + (ntr ? ntr.length : 0));
+            diag.push(' textarea 原文长度=' + fullText.length);
+            diag.push(' mapsReady=' + mapsReady + ' indicesOk=' + indicesOk);
+            diag.push(' rawStart=' + rawStartIdx + ' rawLast=' + rawLastIdx + ' rawNext=' + rawNextIdx);
+            // 额外带一行：当前 textarea 归一化长度（如果它比 ntr 长，基本就是"gPosMaps
+            // 已脏/与清单不同源"，点击「清除全部」后重新捕获就能自愈。）
+            try {
+                var normNow = normalizeText(fullText);
+                diag.push(' 当前textarea归一化长度=' + normNow.length);
+            } catch (e) {}
+            setStatus(diag.join('；') + '。请确认：① 已在右上角捕获原文；② 捕获后没再手动改 textarea 内容；③ 点击「清除全部」后重新捕获再对比。',
+                'status-err');
+            return;
+        }
+
+        // ⚠️ 新方案：显示层 = gSelRanges + 镜像层 span 上色；行为层 = 原生选区三句。
+        //   不再用『钉死另一侧 lastRanged』的脏补丁，改走"两端状态独立 + 双端重绘"。
+        clearSelHighlight(taId);
+        setSelHighlight(taId, start, end, 'program');
+
+        // —— 下面三句，与右上角 locateSelABtn / locateSelBBtn 的最后三句完全一致。
+        //    用户明确要求：行内 A/B 按钮、⏮最前/◀上/★当前/下▶/最后⏭ 这一整套的
+        //    最终"滚动 + 聚焦"行为，必须与右上角两个『定位』按钮完全同流，不做任何
+        //    focus(false)、setTimeout 或额外 mirror 强刷的副作用。
+        ta.setSelectionRange(start, end);
+        scrollCurrentSelectionToNearBottom(ta);
+        try { ta.focus(); } catch (e) {}
+
+        // 双端 refreshMirror：由于两端视觉完全独立于 focus 状态，一起重绘保证
+        // A 的 gSelRanges 没被清 → A 的绿底永久保留；反过来 B→A 也一样。
+        if (typeof gRefreshMirror !== 'undefined') {
+            if (gRefreshMirror.previewA) try { gRefreshMirror.previewA(); } catch (e3) {}
+            if (gRefreshMirror.previewB) try { gRefreshMirror.previewB(); } catch (e3) {}
+        }
+
+        // —— 运行时断言：A/B 选区大小必须等于清单长度。
+        //    注意：这里的选区长度是"原文字符数"（含 CRLF/TAB/多余空格），
+        //    与清单"长度"（标准化字符数）不一定相等，但它们对应的 normalize 版本必须同长度。
+        var afterS = ta.selectionStart, afterE = ta.selectionEnd, afterLen = 0;
+        if (afterS != null && afterE != null) afterLen = Math.abs(afterE - afterS);
+        var selectedRawNorm = normalizeText(fullText.substring(start, end));
+        if (afterLen !== (end - start)) {
+            setStatus(
+                '第 ' + (idx+1) + ' 条' + (side==='a'?'A':'B') + ' 定位断言失败：ta.selectionRange 与应设置的不一致！'
+                + ' 期望 [' + start + ',' + end + ')=' + (end-start)
+                + '，实际 [' + afterS + ',' + afterE + ')=' + afterLen + '。',
+                'status-err'
+            );
+        } else if (selectedRawNorm.length !== txt.length) {
+            setStatus(
+                '第 ' + (idx+1) + ' 条' + (side==='a'?'A':'B') + ' 定位选区标准化长度与清单长度不一致！'
+                + ' 选区(标准化)长度=' + selectedRawNorm.length + '，清单长度=' + txt.length
+                + '。原文长度=' + (end-start) + '。',
+                'status-err'
+            );
+        } else if (selectedRawNorm !== txt) {
+            setStatus(
+                '第 ' + (idx+1) + ' 条' + (side==='a'?'A':'B') + ' 定位后选区标准化内容与公共子序列不一致！请重新对比。',
+                'status-err'
+            );
+        } else {
+            setStatus(
+                '已定位到 ' + (side === 'a' ? 'A' : 'B') + ' 原文第 ' + start + '–' + end + ' 字符（标准化 '
+                + normStart + '+' + normLen + '，原文长度=' + (end-start) + '，标准化长度=' + txt.length + '）',
+                'status-info'
+            );
+        }
+    }
+
+    /* ============================================================
+       复制公共子序列清单（Tab 分隔，粘贴到 Word 自动形成表格）
+       ============================================================ */
+    function copyNumberChanges() {
+        if (!gNumberChanges || gNumberChanges.length === 0) {
+            setStatus('没有公共子序列可复制', 'status-err');
+            return;
+        }
+        var lines = ['序号\t公共子序列\t字符数\t旧文本后20字符\t新文本后20字符\t位置(A|B)'];
+        for (var i = 0; i < gNumberChanges.length; i++) {
+            var s = gNumberChanges[i];
+            lines.push((i + 1) + '\t' + s.text + '\t' + s.length + '\t' + (s.afterA || '') + '\t' + (s.afterB || '') + '\t' + s.aEnd + '|' + s.bEnd);
+        }
+        var text = lines.join('\n');
+
+        // 优先用纯文本（Tab 分隔，粘贴 Word 自动转表格）
+        var blob = new Blob([text], { type: 'text/plain' });
+        var item = new ClipboardItem({ 'text/plain': blob });
+        navigator.clipboard.write([item]).then(function () {
+            setStatus('公共子序列清单已复制，可粘贴到 Word（自动形成表格）', 'status-ok');
+        }).catch(function () {
+            setStatus('复制失败，请重试', 'status-err');
+        });
+    }
+
+    /* ============================================================
+       导出公共子序列清单为 XLSX 文件
+       ============================================================ */
+    function saveNumberChangesXlsx() {
+        if (!gNumberChanges || gNumberChanges.length === 0) {
+            setStatus('没有公共子序列可导出', 'status-err');
+            return;
+        }
+        setStatus('正在生成 XLSX 文件...', 'status-info');
+
+        // 构建 shared strings
+        var strings = [];
+        var stringIdx = {};
+        function getStringIdx(s) {
+            s = String(s || '');
+            if (stringIdx[s] !== undefined) return stringIdx[s];
+            stringIdx[s] = strings.length;
+            strings.push(s);
+            return strings.length - 1;
+        }
+
+        // 表头
+        var headers = ['序号', '公共子序列', '字符数', '旧文本后20字符', '新文本后20字符', '位置(A|B)'];
+        var colWidths = [6, 50, 8, 22, 22, 14];
+
+        // 构建行数据
+        var rows = [];
+        rows.push(headers.map(function (h) { return { t: 's', v: getStringIdx(h) }; }));
+        for (var i = 0; i < gNumberChanges.length; i++) {
+            var s = gNumberChanges[i];
+            rows.push([
+                { t: 'n', v: i + 1 },
+                { t: 's', v: getStringIdx(s.text) },
+                { t: 'n', v: s.length },
+                { t: 's', v: getStringIdx(s.afterA || '') },
+                { t: 's', v: getStringIdx(s.afterB || '') },
+                { t: 's', v: getStringIdx(s.aEnd + '|' + s.bEnd) }
+            ]);
+        }
+
+        // 生成 sheet1.xml
+        var sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        sheetXml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+
+        // 列宽
+        sheetXml += '<cols>';
+        for (var ci = 0; ci < colWidths.length; ci++) {
+            sheetXml += '<col min="' + (ci + 1) + '" max="' + (ci + 1) + '" width="' + colWidths[ci] + '" customWidth="1"/>';
+        }
+        sheetXml += '</cols>';
+
+        sheetXml += '<sheetData>';
+        for (var ri = 0; ri < rows.length; ri++) {
+            sheetXml += '<row r="' + (ri + 1) + '">';
+            for (var ci2 = 0; ci2 < rows[ri].length; ci2++) {
+                var cell = rows[ri][ci2];
+                var ref = String.fromCharCode(65 + ci2) + (ri + 1);
+                if (cell.t === 's') {
+                    sheetXml += '<c r="' + ref + '" t="s"><v>' + cell.v + '</v></c>';
+                } else {
+                    sheetXml += '<c r="' + ref + '"><v>' + cell.v + '</v></c>';
+                }
+            }
+            sheetXml += '</row>';
+        }
+        sheetXml += '</sheetData>';
+
+        // 表头样式（加粗）
+        sheetXml += '<autoFilter ref="A1:F' + rows.length + '"/>';
+        sheetXml += '</worksheet>';
+
+        // sharedStrings.xml
+        var ssXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        ssXml += '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' + strings.length + '" uniqueCount="' + strings.length + '">';
+        for (var si = 0; si < strings.length; si++) {
+            ssXml += '<si><t xml:space="preserve">' + strings[si].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</t></si>';
+        }
+        ssXml += '</sst>';
+
+        // styles.xml
+        var stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        stylesXml += '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+        stylesXml += '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><sz val="11"/><b/><name val="Calibri"/></font></fonts>';
+        stylesXml += '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>';
+        stylesXml += '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>';
+        stylesXml += '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>';
+        stylesXml += '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>';
+        stylesXml += '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>';
+        stylesXml += '</styleSheet>';
+
+        // workbook.xml
+        var workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        workbookXml += '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+        workbookXml += '<sheets><sheet name="公共子序列清单" sheetId="1" r:id="rId1"/></sheets>';
+        workbookXml += '</workbook>';
+
+        // [Content_Types].xml
+        var ctXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        ctXml += '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">';
+        ctXml += '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>';
+        ctXml += '<Default Extension="xml" ContentType="application/xml"/>';
+        ctXml += '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+        ctXml += '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+        ctXml += '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>';
+        ctXml += '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
+        ctXml += '</Types>';
+
+        // _rels/.rels
+        var relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        relsXml += '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        relsXml += '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>';
+        relsXml += '</Relationships>';
+
+        // xl/_rels/workbook.xml.rels
+        var wbRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        wbRelsXml += '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        wbRelsXml += '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>';
+        wbRelsXml += '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>';
+        wbRelsXml += '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>';
+        wbRelsXml += '</Relationships>';
+
+        var zip = new JSZip();
+        zip.file('[Content_Types].xml', ctXml);
+        zip.file('_rels/.rels', relsXml);
+        zip.file('xl/workbook.xml', workbookXml);
+        zip.file('xl/_rels/workbook.xml.rels', wbRelsXml);
+        zip.file('xl/worksheets/sheet1.xml', sheetXml);
+        zip.file('xl/sharedStrings.xml', ssXml);
+        zip.file('xl/styles.xml', stylesXml);
+
+        zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+            .then(function (blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = '公共子序列清单_' + new Date().toISOString().substring(0, 10) + '.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setStatus('XLSX 文件已导出', 'status-ok');
+            })
+            .catch(function (err) {
+                setStatus('导出 XLSX 失败: ' + (err.message || err), 'status-err');
+            });
+    }
+
+    function clearAll() {
+        localStorage.removeItem(LS_KEY_A);
+        localStorage.removeItem(LS_KEY_B);
+        document.getElementById('resultArea').style.display = 'none';
+        gDiffOps = [];
+        gNumberChanges = [];
+        renderNumberChanges([]);
+        updateUI();
+        setStatus('已清除全部缓存', 'status-info');
+    }
+
+    function clearSlot(slot) {
+        var key = slot === 'a' ? LS_KEY_A : LS_KEY_B;
+        localStorage.removeItem(key);
+        updateUI();
+        setStatus('段落 ' + slot.toUpperCase() + ' 已清除', 'status-info');
+    }
+
+    function swapAB() {
+        var textA = localStorage.getItem(LS_KEY_A) || '';
+        var textB = localStorage.getItem(LS_KEY_B) || '';
+        if (!textA && !textB) {
+            setStatus('没有可互换的内容，请先捕获段落', 'status-info');
+            return;
+        }
+        localStorage.setItem(LS_KEY_A, textB);
+        localStorage.setItem(LS_KEY_B, textA);
+        updateUI();
+        setStatus('段落 A 与 B 已互换' + (textA && textB ? '，对比结果已更新' : ''), 'status-ok');
+    }
+    /* ============================================================
+       构建纯文本 DOCX
+       ============================================================ */
+    function buildPlainDocxBlob(plainText) {
+        var lines = plainText.split(/\r?\n/);
+        var pXml = '';
+        for (var i = 0; i < lines.length; i++) {
+            var t = lines[i].trim();
+            if (t.length === 0) {
+                pXml += '<w:p><w:pPr><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei"/><w:sz w:val="24"/></w:rPr></w:pPr></w:p>';
+            } else {
+                pXml += '<w:p><w:pPr><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei"/><w:sz w:val="24"/></w:rPr></w:pPr>' +
+                    '<w:r><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei"/>' +
+                    '<w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">' + xmlEscape(t) + '</w:t></w:r></w:p>';
+            }
+        }
+        var documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:body>' + pXml + '</w:body></w:document>';
+
+        var contentTypeXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+            '<Default Extension="xml" ContentType="application/xml"/>' +
+            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+            '</Types>';
+
+        var relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+            '</Relationships>';
+
+        var docRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+
+        var zip = new JSZip();
+        zip.file('[Content_Types].xml', contentTypeXml);
+        zip.file('_rels/.rels', relsXml);
+        zip.file('word/document.xml', documentXml);
+        zip.file('word/_rels/document.xml.rels', docRelsXml);
+
+        return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    }
+
+    /* ============================================================
+       构建带格式的 Diff DOCX（红色删除线 + 蓝色加粗）
+       ============================================================ */
+    function buildDiffDocxBlob(diffOps) {
+        var pXml = '<w:p><w:pPr><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei"/><w:sz w:val="24"/></w:rPr></w:pPr>';
+
+        for (var i = 0; i < diffOps.length; i++) {
+            var op = diffOps[i];
+            var text = xmlEscape(op.text);
+            if (!text) continue;
+
+            if (op.type === 'equal') {
+                // 相等：正常文本
+                pXml += '<w:r><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei"/>' +
+                    '<w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">' + text + '</w:t></w:r>';
+            } else if (op.type === 'delete') {
+                // 删除：红色 + 删除线
+                pXml += '<w:r><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei"/>' +
+                    '<w:sz w:val="24"/><w:color w:val="C00000"/><w:strike/></w:rPr>' +
+                    '<w:t xml:space="preserve">' + text + '</w:t></w:r>';
+            } else if (op.type === 'insert') {
+                // 新增：蓝色 + 加粗
+                pXml += '<w:r><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei"/>' +
+                    '<w:sz w:val="24"/><w:color w:val="0070C0"/><w:b/></w:rPr>' +
+                    '<w:t xml:space="preserve">' + text + '</w:t></w:r>';
+            }
+        }
+
+        pXml += '</w:p>';
+
+        var documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:body>' + pXml + '</w:body></w:document>';
+
+        var contentTypeXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+            '<Default Extension="xml" ContentType="application/xml"/>' +
+            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+            '</Types>';
+
+        var relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+            '</Relationships>';
+
+        var docRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+
+        var zip = new JSZip();
+        zip.file('[Content_Types].xml', contentTypeXml);
+        zip.file('_rels/.rels', relsXml);
+        zip.file('word/document.xml', documentXml);
+        zip.file('word/_rels/document.xml.rels', docRelsXml);
+
+        return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    }
+
+    /* ============================================================
+       保存带格式的 Diff DOCX 到本地
+       ============================================================ */
+    function saveDiffToLocal() {
+        if (!gDiffOps || gDiffOps.length === 0) {
+            setStatus('没有可保存的对比结果', 'status-error');
+            return;
+        }
+        setStatus('正在生成 DOCX 文件...', 'status-info');
+        buildDiffDocxBlob(gDiffOps).then(function (blob) {
+            saveBlobAs(blob, '对比结果.docx', function () {
+                setStatus('已保存到本地', 'status-info');
+            });
+        }).catch(function (e) {
+            setStatus('保存失败: ' + (e.message || e), 'status-error');
+        });
+    }
+
+    /* ============================================================
+       保存 DOCX（File System Access API，回退下载）
+       ============================================================ */
+    function saveBlobAs(blob, suggestedName, onOk) {
+        // 尝试 File System Access API
+        if (window.showSaveFilePicker) {
+            window.showSaveFilePicker({
+                suggestedName: suggestedName,
+                types: [{
+                    description: 'Word Document',
+                    accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] }
+                }]
+            }).then(function (handle) {
+                return handle.createWritable().then(function (writable) {
+                    return writable.write(blob).then(function () {
+                        return writable.close();
+                    });
+                });
+            }).then(function () {
+                if (onOk) onOk();
+            }).catch(function (e) {
+                // 用户取消或 API 失败 → 回退下载
+                if (e.name !== 'AbortError') {
+                    fallbackDownload(blob, suggestedName);
+                    if (onOk) onOk();
+                }
+            });
+        } else {
+            // 浏览器不支持 → 直接下载
+            fallbackDownload(blob, suggestedName);
+            if (onOk) onOk();
+        }
+    }
+
+    function fallbackDownload(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+    }
+
+    /* ============================================================
+       全屏 / 恢复 切换
+       ============================================================ */
+    function toggleFocusMode(mode) {
+        var body = document.body;
+        var current = '';
+        if (body.classList.contains('focus-mode-a')) current = 'a';
+        else if (body.classList.contains('focus-mode-b')) current = 'b';
+        else if (body.classList.contains('focus-mode-result')) current = 'result';
+
+        body.classList.remove('focus-mode-a', 'focus-mode-b', 'focus-mode-result');
+
+        if (current === mode) {
+            setStatus('已恢复正常布局', 'status-info');
+        } else {
+            body.classList.add('focus-mode-' + mode);
+            if (mode === 'a') setStatus('已放大 A 区，其他区域已隐藏', 'status-info');
+            else if (mode === 'b') setStatus('已放大 B 区，其他区域已隐藏', 'status-info');
+            else if (mode === 'result') setStatus('已放大对比结果，A/B 区已隐藏', 'status-info');
+        }
+        updateFocusButtons();
+    }
+
+    function updateFocusButtons() {
+        var body = document.body;
+        var modeA = body.classList.contains('focus-mode-a');
+        var modeB = body.classList.contains('focus-mode-b');
+        var modeR = body.classList.contains('focus-mode-result');
+        var btnA = document.getElementById('focusABtn');
+        var btnB = document.getElementById('focusBBtn');
+        var btnR = document.getElementById('focusBtn');
+        if (btnA) btnA.textContent = modeA ? '恢复' : '⛶';
+        if (btnB) btnB.textContent = modeB ? '恢复' : '⛶';
+        if (btnR) btnR.textContent = modeR ? '恢复' : '全屏';
+    }
+
+    /* ============================================================
+       保存对比结果为 DOCX
+       ============================================================ */
+    function copyFormattedResult() {
+        var diffEl = document.getElementById('diffContent');
+        if (!diffEl || !diffEl.textContent.trim()) {
+            setStatus('没有可复制的内容', 'status-err');
+            return;
+        }
+
+        // 构建带内联样式的 HTML（粘贴到 Word 时保留格式）
+        var html = '<html><body style="font-family:Microsoft YaHei;font-size:13px;line-height:1.8;">';
+        var spans = diffEl.querySelectorAll('span');
+        for (var i = 0; i < spans.length; i++) {
+            var el = spans[i];
+            var style = 'font-family:Microsoft YaHei;font-size:13px;';
+            if (el.classList.contains('diff-del')) {
+                style += 'color:#C00000;text-decoration:line-through;';
+            } else if (el.classList.contains('diff-ins')) {
+                style += 'color:#0070C0;font-weight:bold;';
+            }
+            html += '<span style="' + style + '">' + escHtml(el.textContent) + '</span>';
+        }
+        html += '</body></html>';
+
+        var blob = new Blob([html], { type: 'text/html' });
+        var item = new ClipboardItem({ 'text/html': blob });
+
+        navigator.clipboard.write([item]).then(function () {
+            setStatus('已复制，可直接粘贴到 Word（保留格式）', 'status-ok');
+        }).catch(function () {
+            setStatus('复制失败，请重试', 'status-err');
+        });
+    }
+
+    function escHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function tsFilename() {
+        var d = new Date();
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        return d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) +
+               p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '_对比结果.docx';
+    }
+
+    /* ============================================================
+       导出两个 DOCX + 打开 compare2word.com
+       ============================================================ */
+    function exportForOnlineCompare() {
+        var textA = localStorage.getItem(LS_KEY_A) || '';
+        var textB = localStorage.getItem(LS_KEY_B) || '';
+        if (!textA || !textB) { setStatus('请先捕获两个段落', 'status-err'); return; }
+
+        setStatus('正在构建两个 DOCX 文件...', 'status-info');
+
+        Promise.all([
+            buildPlainDocxBlob(textA),
+            buildPlainDocxBlob(textB)
+        ]).then(function (results) {
+            fallbackDownload(results[0], '段落A_原始版本.docx');
+            fallbackDownload(results[1], '段落B_修改版本.docx');
+            window.open('https://compare2word.com/zh', '_blank');
+            setStatus('两个 DOCX 已下载，compare2word.com 已打开。请将文件拖入对比页。', 'status-ok');
+        }).catch(function (e) {
+            setStatus('构建失败: ' + (e.message || e), 'status-err');
+        });
+    }
+
+    /* ============================================================
+       初始化
+       ============================================================ */
+    function initUI() {
+        statusEl = document.getElementById('statusBar');
+        setStatus('就绪 — 请先在文档 A 中选中段落，点击「捕获段落 A」', 'status-info');
+
+        document.getElementById('captureABtn').onclick = function () { captureParagraph('a'); };
+        document.getElementById('captureBBtn').onclick = function () { captureParagraph('b'); };
+        document.getElementById('clearABtn').onclick = function () { clearSlot('a'); };
+        document.getElementById('clearBBtn').onclick = function () { clearSlot('b'); };
+        document.getElementById('fullABtn').onclick = function () { captureFullDocument('a'); };
+        document.getElementById('fullBBtn').onclick = function () { captureFullDocument('b'); };
+        // A/B 面板头"定位选区"：把当前选中的文本滚到可视区（末尾在底部往上 2-3 行）
+        // ⚠️ 新方案：显示效果靠 gSelRanges + 镜像层 span 上色，定位/滚动仍走原生选中。
+        //   流程：读原生s/e → 清本端旧上色 → 写入 gSelRanges → setSelectionRange → scroll → focus → 双端重绘
+        //   双端重绘保证 A→B 连环点击时，A 的 gSelRanges 没被清空，A 的色块永久存在。
+        document.getElementById('locateSelABtn').onclick = function () {
+            expandSection('bodyA', 'collapseABtn', 'summaryA');
+            var taId = 'previewA';
+            var ta = document.getElementById(taId);
+            if (!ta) return;
+
+            // ⚠️ 读取原生 s/e 必须放在 clearSelHighlight 之前：
+            //    clearSelHighlight 内部会 setSelectionRange(p,p) 把原生选区折叠成光标，
+            //    写反的话这里读到的永远 s===e → 只能 fallback 到 gSelRanges 里上一次
+            //    的旧 range，表现就是"我明明手选了一段新的，定位后跳到了上次的旧段"。
+            var s = ta.selectionStart, e = ta.selectionEnd;
+            if ((s == null || e == null || s === e) && typeof gSelRanges !== 'undefined') {
+                var cached = gSelRanges[taId];
+                if (cached && cached.s != null && cached.e != null && cached.s < cached.e) {
+                    s = cached.s; e = cached.e;
+                }
+            }
+            if (s == null || e == null || s === e) {
+                setStatus('A 框里目前没有选中任何文本，先选一段再点「定位」', 'status-err');
+                return;
+            }
+            clearSelHighlight(taId);
+            setSelHighlight(taId, s, e, 'user'); // setSelHighlight 内部已同步 ta.setSelectionRange
+            scrollCurrentSelectionToNearBottom(ta);
+            try { ta.focus(); } catch (err) {}
+            if (typeof gRefreshMirror !== 'undefined') {
+                if (gRefreshMirror.previewA) try { gRefreshMirror.previewA(); } catch (e2) {}
+                if (gRefreshMirror.previewB) try { gRefreshMirror.previewB(); } catch (e2) {}
+            }
+            setStatus('已定位 A 当前选区（第 ' + s + '–' + e + ' 字符）', 'status-info');
+        };
+        document.getElementById('locateSelBBtn').onclick = function () {
+            expandSection('bodyB', 'collapseBBtn', 'summaryB');
+            var taId = 'previewB';
+            var ta = document.getElementById(taId);
+            if (!ta) return;
+            var s = ta.selectionStart, e = ta.selectionEnd;
+            if ((s == null || e == null || s === e) && typeof gSelRanges !== 'undefined') {
+                var cachedB = gSelRanges[taId];
+                if (cachedB && cachedB.s != null && cachedB.e != null && cachedB.s < cachedB.e) {
+                    s = cachedB.s; e = cachedB.e;
+                }
+            }
+            if (s == null || e == null || s === e) {
+                setStatus('B 框里目前没有选中任何文本，先选一段再点「定位」', 'status-err');
+                return;
+            }
+            clearSelHighlight(taId);
+            setSelHighlight(taId, s, e, 'user');
+            scrollCurrentSelectionToNearBottom(ta);
+            try { ta.focus(); } catch (err) {}
+            if (typeof gRefreshMirror !== 'undefined') {
+                if (gRefreshMirror.previewA) try { gRefreshMirror.previewA(); } catch (e2) {}
+                if (gRefreshMirror.previewB) try { gRefreshMirror.previewB(); } catch (e2) {}
+            }
+            setStatus('已定位 B 当前选区（第 ' + s + '–' + e + ' 字符）', 'status-info');
+        };
+        document.getElementById('copyBtn').onclick = copyFormattedResult;
+        document.getElementById('saveBtn').onclick = saveDiffToLocal;
+        document.getElementById('copyNumberChangesBtn').onclick = copyNumberChanges;
+        document.getElementById('xlsxNumberChangesBtn').onclick = saveNumberChangesXlsx;
+
+        // 公共子序列清单 — 点击定位按钮；点击其他位置=选中该行
+        document.getElementById('numberChangesBody').onclick = function (e) {
+            var t = e.target;
+            // 定位 A/B 按钮：直接触发
+            if (t && t.classList && t.classList.contains('loc-btn')) {
+                var idx = parseInt(t.getAttribute('data-idx'), 10);
+                var side = t.getAttribute('data-side');
+                gNumSelIdx = idx;
+                highlightRow(idx);
+                locateSequence(idx, side);
+                updateNavButtons2();
+                return;
+            }
+            // 否则：向上找 tr，根据 index 设置选中行
+            var tr = null;
+            var node = t;
+            while (node && node !== this) {
+                if (node.nodeName && node.nodeName.toLowerCase() === 'tr') { tr = node; break; }
+                node = node.parentNode;
+            }
+            if (tr && tr.parentNode) {
+                var rows = Array.prototype.slice.call(this.querySelectorAll('tr'));
+                var i = rows.indexOf(tr);
+                if (i >= 0) {
+                    gNumSelIdx = i;
+                    highlightRow(i);
+                    updateNavButtons2();
+                }
+            }
+        };
+
+        // 公共子序列清单 — 双击任意一行 = 『★当前』按钮效果：同时定位 A 和 B。
+        // 注意：双击在 A/B 内联按钮上不会重复触发本行跳转（因为单击已经会走单端定位，
+        // 再叠加 both 反而会让用户困惑），所以这里遇到 loc-btn 上的 dblclick 就 return。
+        document.getElementById('numberChangesBody').ondblclick = function (e) {
+            var t = e.target;
+            // A/B 行内小按钮上的双击不再追加双端跳转，避免跟它们自己的单击定位冲突
+            if (t && t.classList && t.classList.contains('loc-btn')) return;
+            var tr = null;
+            var node = t;
+            while (node && node !== this) {
+                if (node.nodeName && node.nodeName.toLowerCase() === 'tr') { tr = node; break; }
+                node = node.parentNode;
+            }
+            if (!tr || !tr.parentNode) return;
+            var rows = Array.prototype.slice.call(this.querySelectorAll('tr'));
+            var idx = rows.indexOf(tr);
+            if (idx < 0) return;
+            if (!gNumberChanges || idx >= gNumberChanges.length) return;
+            gNumSelIdx = idx;
+            highlightRow(idx);
+            // 与 『★当前』按钮完全等价：先 B 再 A，最终 A 端获得焦点，A/B 两端都红。
+            locateSequence(idx, 'b');
+            locateSequence(idx, 'a');
+            updateNavButtons2();
+        };
+
+        // 公共子序列清单 — 折叠/展开
+        document.getElementById('collapseNumBtn').onclick = function () {
+            var content = document.getElementById('numberChangesContent');
+            if (!content) return;
+            if (content.style.display === 'none') {
+                content.style.display = '';
+                this.textContent = '▼';
+                this.title = '折叠';
+            } else {
+                content.style.display = 'none';
+                this.textContent = '▶';
+                this.title = '展开';
+            }
+        };
+
+        // —— 公共子序列行选中 + 导航（基于当前选中行） ——
+        var gNumSelIdx = -1;
+
+        // 高亮指定行（-1 取消全部），并让该行在 number-changes-body 独立滚动区中可见
+        function highlightRow(idx) {
+            var rows = document.querySelectorAll('#numberChangesBody tr');
+            rows.forEach(function (r) { r.classList.remove('selected-row'); });
+            if (idx >= 0 && rows[idx]) {
+                rows[idx].classList.add('selected-row');
+                // 显式滚动 number-changes-body：用 getBoundingClientRect 相对位置计算，避免 offsetParent 歧义
+                var scrollBox = document.querySelector('.number-changes-body');
+                if (scrollBox) {
+                    var row = rows[idx];
+                    var boxRect = scrollBox.getBoundingClientRect();
+                    var rowRect = row.getBoundingClientRect();
+                    // 当前 row 相对 scrollBox 可视区顶部的距离
+                    var relTop = rowRect.top - boxRect.top;
+                    var relBot = rowRect.bottom - boxRect.top;
+                    var boxH = boxRect.height;
+                    var headerPad = 30;   // sticky 表头高度 + 少许留白
+                    // 情况1：当前行顶部在表头之上（被盖）→ 向上滚，停在表头下方
+                    if (relTop < headerPad) {
+                        scrollBox.scrollTop += (relTop - headerPad);
+                    }
+                    // 情况2：当前行底部超出可视区底部 → 向下滚，让行底部贴住可视区底边
+                    else if (relBot > boxH) {
+                        scrollBox.scrollTop += (relBot - boxH);
+                    }
+                }
+            }
+        }
+
+        // 跳转到选中行（在 A/B 中同时定位）——两条定位各跑一遍右上角相同的三句执行流
+        function locateCurrent() {
+            if (gNumSelIdx < 0 || !gNumberChanges[gNumSelIdx]) return;
+            // 注意：顺序是 先 B 后 A，所以最终焦点落在 A 上（若要反过来就调换两行）。
+            // 每一条都独立走：setSelectionRange → scrollCurrentSelectionToNearBottom → focus，
+            // 与 locateSequence 内那三句、与右上角两个『定位』按钮完全同流，不加
+            // setTimeout 延迟、不加 focus:false、不强刷 mirror。
+            locateSequence(gNumSelIdx, 'b');
+            locateSequence(gNumSelIdx, 'a');
+        }
+
+        function updateNavButtons2() {
+            var total = gNumberChanges.length;
+            var first = document.getElementById('navFirstBtn');
+            var prev  = document.getElementById('navPrevBtn');
+            var curr  = document.getElementById('navCurrBtn');
+            var next  = document.getElementById('navNextBtn');
+            var last  = document.getElementById('navLastBtn');
+            if (!first) return;
+            first.disabled = (total === 0);
+            prev.disabled  = (total === 0 || gNumSelIdx <= 0);
+            curr.disabled  = (total === 0 || gNumSelIdx < 0);
+            next.disabled  = (total === 0 || gNumSelIdx >= total - 1);
+            last.disabled  = (total === 0);
+        }
+
+        document.getElementById('navFirstBtn').onclick = function () {
+            if (!gNumberChanges.length) return;
+            gNumSelIdx = 0; highlightRow(gNumSelIdx); locateCurrent(); updateNavButtons2();
+        };
+        document.getElementById('navPrevBtn').onclick = function () {
+            if (!gNumberChanges.length) return;
+            if (gNumSelIdx < 0) gNumSelIdx = 0;
+            else gNumSelIdx = Math.max(0, gNumSelIdx - 1);
+            highlightRow(gNumSelIdx); locateCurrent(); updateNavButtons2();
+        };
+        document.getElementById('navCurrBtn').onclick = function () { locateCurrent(); updateNavButtons2(); };
+        document.getElementById('navNextBtn').onclick = function () {
+            if (!gNumberChanges.length) return;
+            if (gNumSelIdx < 0) gNumSelIdx = 0;
+            else gNumSelIdx = Math.min(gNumberChanges.length - 1, gNumSelIdx + 1);
+            highlightRow(gNumSelIdx); locateCurrent(); updateNavButtons2();
+        };
+        document.getElementById('navLastBtn').onclick = function () {
+            if (!gNumberChanges.length) return;
+            gNumSelIdx = gNumberChanges.length - 1; highlightRow(gNumSelIdx); locateCurrent(); updateNavButtons2();
+        };
+
+        // 列隐藏：表头 × 按钮
+        var colClassMap = {
+            'col-seq': 'col-seq',
+            'col-len': 'col-len',
+            'col-after-a': 'col-after-a',
+            'col-after-b': 'col-after-b',
+            'col-pos': 'col-pos',
+            'col-loc': 'col-loc'
+        };
+        var colThClassMap = {
+            'col-seq': 'col-seq-th',
+            'col-len': 'col-len-th',
+            'col-after-a': 'col-after-a-th',
+            'col-after-b': 'col-after-b-th',
+            'col-pos': 'col-pos-th',
+            'col-loc': 'col-loc-th'
+        };
+        document.getElementById('numberChangesBody').parentNode.querySelectorAll('.col-hide-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var cls = colClassMap[btn.dataset.col];
+                var thCls = colThClassMap[btn.dataset.col];
+                // 隐藏表头
+                var ths = document.querySelectorAll('.' + thCls);
+                for (var i = 0; i < ths.length; i++) ths[i].classList.add('hidden');
+                // 隐藏表格中的列
+                var cells = document.querySelectorAll('.' + cls);
+                for (var j = 0; j < cells.length; j++) cells[j].classList.add('hidden');
+                // 显示恢复按钮
+                document.getElementById('showAllColsBtn').style.display = '';
+            });
+        });
+        // 全部显示
+        document.getElementById('showAllColsBtn').onclick = function () {
+            for (var k in colClassMap) {
+                var cells = document.querySelectorAll('.' + colClassMap[k]);
+                for (var ci = 0; ci < cells.length; ci++) cells[ci].classList.remove('hidden');
+                var ths = document.querySelectorAll('.' + colThClassMap[k]);
+                for (var ti = 0; ti < ths.length; ti++) ths[ti].classList.remove('hidden');
+            }
+            this.style.display = 'none';
+        };
+
+        document.getElementById('viewMode').onchange = function () {
+            gViewMode = this.value;
+            var textA = localStorage.getItem(LS_KEY_A) || '';
+            var textB = localStorage.getItem(LS_KEY_B) || '';
+            if (textA && textB) computeAndShowDiff(textA, textB);
+        };
+
+        document.getElementById('swapBtn').onclick = swapAB;
+        document.getElementById('clearBtn').onclick = clearAll;
+
+        // =============== 选区高亮镜像层（双框同时显示选中）===============
+        function setupMirror(textareaId, mirrorId, wrapId) {
+            var ta = document.getElementById(textareaId);
+            var mirror = document.getElementById(mirrorId);
+            var wrap = document.getElementById(wrapId);
+            if (!ta || !mirror || !wrap) return;
+
+            // 给 wrap 初始化一个状态：默认当作"用户选区"，等 locateSequence / 定位选区按钮
+            // 调用 setSelectionRange 前先打 pending-program，refreshMirror 读到再改成 program。
+            wrap.setAttribute('data-sel-source', 'user');
+
+            /* ===================================================================
+               失焦选区持久化 —— 解决"点A后再点B，A框绿色高亮消失"的根因：
+
+               浏览器在 textarea 失焦（blur）时，会**立刻、同步地**把 selectionStart/End
+               压成同一个光标值（s===e 空选）。等 blur 事件回调执行时再读
+               selectionStart/End 往往已经是折叠后的值了，之前的缓存方案在这个时机
+               下会出现"读到空选 → 回退失败"。
+
+               修复分两层（抢在浏览器折叠选区之前把快照写下来）：
+                 A) 文档级 mousedown：用户按下任何按钮/空白处之前，如果"当前正在聚焦的
+                    textarea 正好是我们自己"，就立刻写 lastRanged。这个事件发生在
+                    失焦之前。
+                 B) 文档级 focusin：当新的 focus 目标不在本 textarea 内（意味着我们
+                    马上要失焦），再写一次快照做双保险。
+                 C) 即便到 blur 事件里仍然 fallback 读 lastRanged 画镜像层，三层兜底。
+               =================================================================== */
+            var lastRanged = null;  // {s,e,source}
+
+            function htmlEscape(s) {
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            // 用户手选 / 键盘选 的快照：
+            //   ⚠️ 只保留内部 lastRanged 缓存 + 返回布尔，不再写 gSelRanges[taId]。
+            //   原因：之前任何一次鼠标拖选都会把 gSelRanges 填成 user，refreshMirror
+            //   就会立刻画成 红粗黄底——导致你"还没点定位按钮"就看到满屏随机红色段，
+            //   完全分不清哪段才是真正的定位命中。
+            //   现在 gSelRanges 只允许 setSelHighlight / clearSelHighlight 这一对接口
+            //   改（= 只有明确点了按钮才画定位红）。
+            function snapshotRanged() {
+                var val = ta.value;
+                var s = Math.min(ta.selectionStart != null ? ta.selectionStart : 0, val.length);
+                var e = Math.min(ta.selectionEnd   != null ? ta.selectionEnd   : 0, val.length);
+                if (s > e) { var t = s; s = e; e = t; }
+                if (s < e) {
+                    lastRanged = { s: s, e: e, source: 'user' };
+                    return true;
+                }
+                return false;
+            }
+
+            function refreshMirror() {
+                var val = ta.value;
+                var L = val.length;
+
+                /* ══════════════════════════════════════════════════════
+                   用户最终拍板：定位 → 直接给那段文字用 红色字体 标出来。
+                   所以这里只干两件事：
+                     ① 从 gSelRanges[textareaId] 取 [s, e)，
+                     ② 有合法 range 就包 <span class="preview-sel"> （css 定死红+粗）。
+                   不再读 ta.selectionStart/End / activeElement / lastRanged，
+                   也不再管 source 是 program 还是 user——简化到最小，确保
+                   不会出现"条件没命中 → 没上色 → 用户说没反应"。
+                   ══════════════════════════════════════════════════════ */
+                var s = -1, e = -1;
+                try {
+                    if (typeof gSelRanges !== 'undefined') {
+                        var state = gSelRanges[textareaId];
+                        if (state && typeof state === 'object') {
+                            var s0 = state.s, e0 = state.e;
+                            s0 = Math.max(0, Math.min(s0 == null ? 0 : s0, L));
+                            e0 = Math.max(s0, Math.min(e0 == null ? s0 : e0, L));
+                            if (s0 < e0) { s = s0; e = e0; }
+                        }
+                    }
+                } catch (err) { s = -1; e = -1; }
+
+                // 不管 data-sel-source / pending-source 了：
+                // .preview-sel 的 CSS 已经统一红色字体，不依赖外层属性。
+                wrap.removeAttribute('data-sel-source');
+                wrap.removeAttribute('data-pending-source');
+
+                var html;
+                if (s < 0) {
+                    html = htmlEscape(val);
+                } else {
+                    html = htmlEscape(val.substring(0, s))
+                         + '<span class="preview-sel" style="color:#d80000!important;font-weight:700!important;background:transparent!important;">'
+                         + htmlEscape(val.substring(s, e))
+                         + '</span>'
+                         + htmlEscape(val.substring(e));
+                }
+                mirror.innerHTML = html;
+                mirror.style.height = ta.offsetHeight + 'px';
+                mirror.style.width = ta.offsetWidth + 'px';
+                mirror.scrollTop = ta.scrollTop;
+                mirror.scrollLeft = ta.scrollLeft;
+            }
+
+            function syncSize() {
+                mirror.style.height = ta.offsetHeight + 'px';
+                mirror.style.width = ta.offsetWidth + 'px';
+                mirror.scrollTop = ta.scrollTop;
+                mirror.scrollLeft = ta.scrollLeft;
+            }
+
+            function markAsUser(e) {
+                wrap.setAttribute('data-sel-source', 'user');
+                wrap.removeAttribute('data-pending-source');
+            }
+
+            /* ========= 抢在失焦前把真实选区快照下来 ========= */
+            // mousedown：用户按下鼠标的瞬间（任何地方，包括按钮/外面空白）
+            // 此时 textarea 还没失焦，selectionStart/End 仍是范围值
+            document.addEventListener('mousedown', function (ev) {
+                if (document.activeElement === ta) {
+                    snapshotRanged();
+                }
+            }, true);   // 捕获阶段：保证先于子元素 mousedown 执行，真的"抢在一切之前"
+
+            // focusin：当 focus 要切到其他元素时，再快照一次（应对 Tab 切焦/程序 focus 等没 mousedown 的场景）
+            document.addEventListener('focusin', function (ev) {
+                var target = ev.target;
+                var insideTa = (target === ta)
+                    || (target && ta.contains && ta.contains(target));
+                if (document.activeElement === ta && !insideTa) {
+                    snapshotRanged();
+                }
+            }, true);
+
+            // 事件绑定
+            ta.addEventListener('input', function () {
+                var isSyncNormalize = (ta.dataset && ta.dataset.__syncNormalizing === '1');
+                markAsUser();
+                // 真正的用户输入：内容改了字符下标就变了，lastRanged 必须清空
+                if (!isSyncNormalize) {
+                    lastRanged = null;
+                }
+                refreshMirror();
+                syncSize();
+            });
+            ta.addEventListener('mousedown', markAsUser);
+            ta.addEventListener('mouseup',   function () { markAsUser(); snapshotRanged(); refreshMirror(); });
+            ta.addEventListener('select',    function () { snapshotRanged(); refreshMirror(); });
+            ta.addEventListener('keydown',   markAsUser);
+            ta.addEventListener('keyup',     function () { markAsUser(); snapshotRanged(); refreshMirror(); });
+            ta.addEventListener('focus', function () { snapshotRanged(); refreshMirror(); });
+            ta.addEventListener('blur',  function () {
+                // blur 之前已经在 mousedown / focusin 做过快照，这里直接用缓存回退画
+                snapshotRanged();   // 再补一次（有些浏览器 blur 前还没改选区）
+                refreshMirror();
+            });
+            ta.addEventListener('scroll', function () { syncSize(); refreshMirror(); });
+            if (typeof ResizeObserver !== 'undefined') {
+                new ResizeObserver(function () { syncSize(); refreshMirror(); }).observe(ta);
+            }
+
+            refreshMirror();
+            setTimeout(syncSize, 50);
+            // 暴露：locateSequence / computeAndShowDiff 等能从闭包外强制刷新这一侧的镜像
+            gRefreshMirror[textareaId] = refreshMirror;
+            // 暴露：失焦前"最后一次真实选区"快照。
+            // 右上角『A 定位 / B 定位』按钮会读取它，解决"人在 textarea 选好了，
+            // 一点按钮浏览器先 blur → s===e → 按钮误以为没选"的问题。
+            Object.defineProperty(gLastRangedCache, textareaId, {
+                configurable: true,
+                enumerable: true,
+                get: function () { return lastRanged; },
+                set: function (v) { lastRanged = v; }
+            });
+        }
+
+        setupMirror('previewA', 'mirrorA', 'wrapA');
+        setupMirror('previewB', 'mirrorB', 'wrapB');
+
+        // textarea 手动编辑/粘贴自动同步到 localStorage
+        var syncTimerA = null;
+        document.getElementById('previewA').oninput = function () {
+            clearTimeout(syncTimerA);
+            syncTimerA = setTimeout(function () {
+                localStorage.setItem(LS_KEY_A, document.getElementById('previewA').value);
+                updateUI();
+            }, 300);
+        };
+        var syncTimerB = null;
+        document.getElementById('previewB').oninput = function () {
+            clearTimeout(syncTimerB);
+            syncTimerB = setTimeout(function () {
+                localStorage.setItem(LS_KEY_B, document.getElementById('previewB').value);
+                updateUI();
+            }, 300);
+        };
+
+        // 折叠按钮
+        document.getElementById('collapseABtn').onclick = function () { toggleSection('bodyA', 'collapseABtn', 'summaryA'); };
+        document.getElementById('collapseBBtn').onclick = function () { toggleSection('bodyB', 'collapseBBtn', 'summaryB'); };
+        document.getElementById('collapseResultBtn').onclick = function () { toggleSection('bodyResult', 'collapseResultBtn', null); };
+
+        // 对比结果：自动打开 记忆
+        var LS_AUTO_OPEN_RESULT = 'compare:autoOpenResult';
+        var autoOpenCb = document.getElementById('autoOpenResult');
+        var savedOpen = localStorage.getItem(LS_AUTO_OPEN_RESULT);
+        if (savedOpen !== null) {
+            // 恢复用户上次的勾选
+            autoOpenCb.checked = (savedOpen === '1');
+        } else {
+            // 默认：选中（和之前默认展开一致）
+            autoOpenCb.checked = true;
+        }
+        autoOpenCb.onchange = function () {
+            localStorage.setItem(LS_AUTO_OPEN_RESULT, autoOpenCb.checked ? '1' : '0');
+        };
+        // 放大按钮
+        document.getElementById('focusABtn').onclick = function () { toggleFocusMode('a'); };
+        document.getElementById('focusBBtn').onclick = function () { toggleFocusMode('b'); };
+
+        updateUI();
+
+        var textA = localStorage.getItem(LS_KEY_A) || '';
+        var textB = localStorage.getItem(LS_KEY_B) || '';
+        if (textA && textB) {
+            setStatus('检测到缓存的段落，对比结果已加载', 'status-info');
+        } else if (textA || textB) {
+            setStatus('检测到部分缓存，请捕获另一个段落', 'status-info');
+        }
+
+        // 页面加载后，按用户记忆决定对比结果是否自动展开
+        var shouldOpen = autoOpenCb.checked;
+        var bodyResult = document.getElementById('bodyResult');
+        var sectionExpanded = !bodyResult.classList.contains('collapsed');
+        if (shouldOpen !== sectionExpanded) {
+            toggleSection('bodyResult', 'collapseResultBtn', null);
+        }
+
+        // A/B 文本框高度：自定义 + 记忆
+        var LS_H_A = 'compare:boxHeightA';
+        var LS_H_B = 'compare:boxHeightB';
+        var hAInput = document.getElementById('boxHeightA');
+        var hBInput = document.getElementById('boxHeightB');
+        var previewA = document.getElementById('previewA');
+        var previewB = document.getElementById('previewB');
+        function applyBoxHeight(side, px) {
+            px = parseInt(px, 10);
+            if (isNaN(px) || px < 30) px = 200;
+            var ta = side === 'a' ? previewA : previewB;
+            var mirror = document.getElementById(side === 'a' ? 'mirrorA' : 'mirrorB');
+            ta.style.height = px + 'px';
+            ta.style.minHeight = px + 'px';
+            ta.style.maxHeight = (px * 2.5) + 'px';
+            // 同步镜像层大小（镜像层和textarea重叠）
+            if (mirror) {
+                mirror.style.height = px + 'px';
+                mirror.style.minHeight = px + 'px';
+                mirror.style.maxHeight = (px * 2.5) + 'px';
+            }
+        }
+        function loadBoxHeight(side) {
+            var key = side === 'a' ? LS_H_A : LS_H_B;
+            var input = side === 'a' ? hAInput : hBInput;
+            var saved = localStorage.getItem(key);
+            if (!saved) saved = '200';
+            input.value = saved;
+            applyBoxHeight(side, saved);
+        }
+        loadBoxHeight('a');
+        loadBoxHeight('b');
+        hAInput.onchange = function () {
+            localStorage.setItem(LS_H_A, hAInput.value);
+            applyBoxHeight('a', hAInput.value);
+        };
+        hBInput.onchange = function () {
+            localStorage.setItem(LS_H_B, hBInput.value);
+            applyBoxHeight('b', hBInput.value);
+        };
+    }
+
+    /* ============================================================
+       切换 diff 算法
+       ============================================================ */
+    function switchAlgo(algo) {
+        gDiffAlgo = algo;
+        ['Anchor','Classic','Line','Hier'].forEach(function(id) {
+            var btn = document.getElementById('algo' + id);
+            if (btn) {
+                if (algo === id.toLowerCase()) {
+                    btn.className = (id === 'Hier') ? 'btn btn-algo algo-active-green' : 'btn btn-algo algo-active';
+                } else {
+                    btn.className = 'btn btn-algo';
+                }
+            }
+        });
+        // 如果已有对比文本，重新执行 diff
+        var a = localStorage.getItem(LS_KEY_A);
+        var b = localStorage.getItem(LS_KEY_B);
+        if (a && b) computeAndShowDiff(a, b);
+    }
+
+    document.addEventListener('DOMContentLoaded', function () { initUI(); });
+    </script>
+</body>
+</html>

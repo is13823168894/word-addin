@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>标题导航面板</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:"Microsoft YaHei",sans-serif;font-size:13px;color:#333;background:#fff;overflow:hidden;display:flex;flex-direction:column;height:100vh;}
+.toolbar{padding:8px 10px;border-bottom:1px solid #ddd;display:flex;gap:6px;flex-wrap:wrap;background:#f7f7f7;flex-shrink:0;}
+.toolbar button{padding:5px 12px;font-size:12px;cursor:pointer;border:1px solid #bbb;border-radius:3px;background:#fff;color:#333;white-space:nowrap;}
+.toolbar button:hover{background:#e8e8e8;}
+.toolbar button.accent{background:#2b579a;color:white;border-color:#2b579a;}
+.toolbar button.accent:hover{background:#1e3f6f;}
+.toolbar .sep{width:1px;background:#ddd;margin:0 4px;align-self:stretch;}
+.toolbar .count{font-size:12px;color:#666;line-height:28px;margin-left:4px;}
+.list-wrap{flex:1;overflow-y:auto;padding:4px 0;}
+.heading-row{display:flex;align-items:flex-start;padding:3px 10px;cursor:default;border-bottom:1px solid #f0f0f0;line-height:1.5;user-select:none;}
+.heading-row:hover{background:#e8f0fe;}
+.heading-row.sel{background:#cce0ff;}
+.heading-row .cb{flex-shrink:0;width:22px;padding-top:1px;}
+.heading-row .cb input{margin:0;cursor:pointer;vertical-align:middle;}
+.heading-row .txt{flex:1;cursor:pointer;word-break:break-all;padding-top:1px;min-width:0;}
+.heading-row .txt:hover{color:#2b579a;text-decoration:underline;}
+.heading-row .lvl{flex-shrink:0;font-size:10px;color:#999;padding-top:2px;margin-left:6px;}
+.empty{padding:30px 20px;text-align:center;color:#999;font-size:13px;}
+.status-bar{padding:4px 10px;border-top:1px solid #ddd;background:#f7f7f7;font-size:11px;color:#888;flex-shrink:0;min-height:22px;}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button onclick="refreshHeadings()" title="重新扫描文档标题">刷新</button>
+  <span class="sep"></span>
+  <button id="selectAllBtn" onclick="toggleSelectAll()">全选</button>
+  <button id="invertBtn" onclick="invertSelection()">反选</button>
+  <button id="copyBtn" class="accent" onclick="copySelected()">复制标题</button>
+  <button id="copyFullBtn" class="accent" onclick="copySelectedFullText()">复制正文</button>
+  <button id="selectFullBtn" onclick="selectSelectedFullText()">选中正文</button>
+  <span class="sep"></span>
+  <span id="countLabel" class="count"></span>
+</div>
+
+<div class="list-wrap" id="headingList">
+  <div class="empty">点击「刷新」加载文档标题</div>
+</div>
+
+<div class="status-bar" id="statusBar">就绪</div>
+
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script>
+var headings = [];
+var selected = {};
+var selectAllCb = document.getElementById('selectAllBtn');
+var statusBar = document.getElementById('statusBar');
+var countLabel = document.getElementById('countLabel');
+var listWrap = document.getElementById('headingList');
+
+Office.onReady(function() {
+  statusBar.textContent = '就绪 - 点击「刷新」加载标题';
+  // 自动加载一次
+  refreshHeadings();
+});
+
+function refreshHeadings() {
+  statusBar.textContent = '正在加载标题...';
+  Word.run(function(ctx) {
+    var paras = ctx.document.body.paragraphs;
+    paras.load('style, styleBuiltIn, outlineLevel, text');
+    return ctx.sync().then(function() {
+      headings = [];
+      selected = {};
+      for (var i = 0; i < paras.items.length; i++) {
+        var p = paras.items[i];
+        var level = getHeadingLevel(p);
+        if (level > 0) {
+          headings.push({
+            text: p.text.replace(/[\r\n]/g, '').trim(),
+            level: level,
+            paraIdx: i
+          });
+        }
+      }
+      renderList();
+      updateToolbar();
+      if (headings.length === 0) {
+        statusBar.textContent = '未检测到标题（共扫描 ' + paras.items.length + ' 段）';
+      } else {
+        statusBar.textContent = '已加载 ' + headings.length + ' 个标题';
+      }
+    });
+  }).catch(function(err) {
+    statusBar.textContent = '加载失败: ' + err.message;
+    headings = [];
+    selected = {};
+    renderList();
+    updateToolbar();
+  });
+}
+
+function getHeadingLevel(p) {
+  // 方法1: outlineLevel 最可靠，不受语言影响
+  var ol = p.outlineLevel;
+  if (ol) {
+    var m = String(ol).match(/level(\d+)/i);
+    if (m) {
+      var n = parseInt(m[1], 10);
+      if (n >= 1 && n <= 9) return n;
+    }
+  }
+  // 方法2: styleBuiltIn 内置样式名（英文环境）
+  var sb = p.styleBuiltIn;
+  if (sb) {
+    var m2 = String(sb).match(/Heading(\d+)/i);
+    if (m2) {
+      var n2 = parseInt(m2[1], 10);
+      if (n2 >= 1 && n2 <= 9) return n2;
+    }
+  }
+  // 方法3: 样式名称（中文环境为"标题 1"，英文为"Heading 1"）
+  var st = p.style;
+  if (st) {
+    st = String(st);
+    var m3 = st.match(/Heading\s*(\d+)/i);
+    if (m3) {
+      var n3 = parseInt(m3[1], 10);
+      if (n3 >= 1 && n3 <= 9) return n3;
+    }
+    var m4 = st.match(/标题\s*(\d+)/);
+    if (m4) {
+      var n4 = parseInt(m4[1], 10);
+      if (n4 >= 1 && n4 <= 9) return n4;
+    }
+  }
+  return 0;
+}
+
+function renderList() {
+  var html = '';
+  for (var i = 0; i < headings.length; i++) {
+    var h = headings[i];
+    var indent = (h.level - 1) * 18;
+    html += '<div class="heading-row' + (selected[i] ? ' sel' : '') + '" id="row' + i + '">';
+    html += '<span class="cb"><input type="checkbox" ' + (selected[i] ? 'checked ' : '') + 'onclick="toggleOne(' + i + ',event)"></span>';
+    html += '<span class="txt" style="padding-left:' + indent + 'px" onclick="gotoHeading(' + i + ',event)" title="点击跳转到文档中的此标题">' + escHtml(h.text) + '</span>';
+    html += '<span class="lvl">H' + h.level + '</span>';
+    html += '</div>';
+  }
+  if (headings.length === 0) {
+    html = '<div class="empty">文档中没有标题</div>';
+  }
+  listWrap.innerHTML = html;
+}
+
+function toggleOne(idx, evt) {
+  if (evt) evt.stopPropagation();
+  selected[idx] = !selected[idx];
+  var row = document.getElementById('row' + idx);
+  if (row) {
+    row.className = 'heading-row' + (selected[idx] ? ' sel' : '');
+    var cb = row.querySelector('input[type="checkbox"]');
+    if (cb) cb.checked = selected[idx];
+  }
+  updateToolbar();
+}
+
+function toggleSelectAll() {
+  var total = headings.length;
+  var checked = countSelected();
+  var selectAll = checked < total;
+  for (var i = 0; i < headings.length; i++) {
+    selected[i] = selectAll;
+  }
+  renderList();
+  updateToolbar();
+}
+
+function invertSelection() {
+  for (var i = 0; i < headings.length; i++) {
+    selected[i] = !selected[i];
+  }
+  renderList();
+  updateToolbar();
+}
+
+function countSelected() {
+  var n = 0;
+  for (var i = 0; i < headings.length; i++) {
+    if (selected[i]) n++;
+  }
+  return n;
+}
+
+function updateToolbar() {
+  var total = headings.length;
+  var checked = countSelected();
+  countLabel.textContent = '已选 ' + checked + '/' + total;
+  selectAllCb.textContent = (checked >= total && total > 0) ? '取消全选' : '全选';
+}
+
+function copySelected() {
+  var texts = [];
+  for (var i = 0; i < headings.length; i++) {
+    if (selected[i]) texts.push(headings[i].text);
+  }
+  if (texts.length === 0) {
+    statusBar.textContent = '未选中任何标题';
+    return;
+  }
+  var content = texts.join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(content).then(function() {
+      statusBar.textContent = '已复制 ' + texts.length + ' 个标题';
+    }).catch(function() {
+      fallbackCopy(content, texts.length);
+    });
+  } else {
+    fallbackCopy(content, texts.length);
+  }
+}
+
+function fallbackCopy(text, count) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); statusBar.textContent = '已复制 ' + count + ' 个标题'; }
+  catch(e) { statusBar.textContent = '复制失败，请手动复制'; }
+  document.body.removeChild(ta);
+}
+
+function findSectionEnd(startIdx, level) {
+  for (var i = 0; i < headings.length; i++) {
+    if (headings[i].paraIdx > startIdx && headings[i].level <= level) {
+      return headings[i].paraIdx - 1;
+    }
+  }
+  return -1;
+}
+
+function copySelectedFullText() {
+  var selIdx = [];
+  for (var i = 0; i < headings.length; i++) {
+    if (selected[i]) selIdx.push(i);
+  }
+  if (selIdx.length === 0) {
+    statusBar.textContent = '未选中任何标题';
+    return;
+  }
+  statusBar.textContent = '正在复制正文（含格式）...';
+  Word.run(function(ctx) {
+    var paras = ctx.document.body.paragraphs;
+    paras.load('text');
+    return ctx.sync().then(function() {
+      var total = paras.items.length;
+      var ranges = [];
+      for (var s = 0; s < selIdx.length; s++) {
+        var h = headings[selIdx[s]];
+        var end = findSectionEnd(h.paraIdx, h.level);
+        if (end < 0) end = total - 1;
+        if (end >= total) end = total - 1;
+        ranges.push({ start: h.paraIdx, end: end });
+      }
+      var merged = mergeRanges(ranges);
+      if (merged.length === 0) return ctx.sync();
+      var rangeObjs = [];
+      var htmlResults = [];
+      for (var m = 0; m < merged.length; m++) {
+        var rng = paras.items[merged[m].start].getRange('Start').expandTo(
+          paras.items[merged[m].end].getRange('End')
+        );
+        rng.load('text');
+        if (typeof rng.getHtml === 'function') {
+          htmlResults.push(rng.getHtml());
+        } else {
+          htmlResults.push(null);
+        }
+        rangeObjs.push(rng);
+      }
+      return ctx.sync().then(function() {
+        var htmlParts = [];
+        var textParts = [];
+        for (var r = 0; r < rangeObjs.length; r++) {
+          var text = rangeObjs[r].text || '';
+          var html = htmlResults[r] && htmlResults[r].value ? htmlResults[r].value : null;
+          if (!html) {
+            html = '<p>' + escHtml(text).replace(/\n/g, '<br>') + '</p>';
+          }
+          if (htmlParts.length > 0) {
+            htmlParts.push('<p>&nbsp;</p>');
+          }
+          htmlParts.push(html);
+          textParts.push(text);
+        }
+        writeRichClipboard(htmlParts.join(''), textParts.join('\n\n'), rangeObjs.length);
+      });
+    });
+  }).catch(function(err) {
+    statusBar.textContent = '复制正文失败: ' + err.message;
+  });
+}
+
+function writeRichClipboard(html, plain, count) {
+  if (!html || html.indexOf('undefined') === 0) {
+    selectForNativeCopy(count);
+    return;
+  }
+  try {
+    var blobHtml = new Blob([html], { type: 'text/html' });
+    var blobText = new Blob([plain || ''], { type: 'text/plain' });
+    var item = new ClipboardItem({
+      'text/html': blobHtml,
+      'text/plain': blobText
+    });
+    navigator.clipboard.write([item]).then(function() {
+      statusBar.textContent = '已复制 ' + count + ' 段正文（含格式）';
+    }).catch(function() {
+      selectForNativeCopy(count);
+    });
+  } catch (e) {
+    selectForNativeCopy(count);
+  }
+}
+
+function selectForNativeCopy(count) {
+  statusBar.textContent = '当前环境不支持富文本剪贴板，正在选中内容...';
+  selectSelectedFullTextNative(function(ok) {
+    if (ok) {
+      statusBar.textContent = '已选中 ' + count + ' 段正文，请按 Ctrl+C 复制以保留 Word 原格式';
+    }
+  });
+}
+
+function selectSelectedFullText() {
+  selectSelectedFullTextNative(function(ok) {
+    if (ok) {
+      statusBar.textContent = '已选中 ' + countSelected() + ' 个标题的内容';
+    }
+  });
+}
+
+function selectSelectedFullTextNative(callback) {
+  var selIdx = [];
+  for (var i = 0; i < headings.length; i++) {
+    if (selected[i]) selIdx.push(i);
+  }
+  if (selIdx.length === 0) {
+    statusBar.textContent = '未选中任何标题';
+    if (callback) callback(false);
+    return;
+  }
+  statusBar.textContent = '正在选中正文...';
+  Word.run(function(ctx) {
+    var paras = ctx.document.body.paragraphs;
+    paras.load('text');
+    return ctx.sync().then(function() {
+      var total = paras.items.length;
+      var ranges = [];
+      for (var s = 0; s < selIdx.length; s++) {
+        var h = headings[selIdx[s]];
+        var end = findSectionEnd(h.paraIdx, h.level);
+        if (end < 0) end = total - 1;
+        if (end >= total) end = total - 1;
+        ranges.push({
+          start: h.paraIdx,
+          end: end
+        });
+      }
+      if (ranges.length === 0) return ctx.sync();
+      var merged = mergeRanges(ranges);
+      if (merged.length > 1) {
+        statusBar.textContent = 'Word 不支持同时选中多个不连续区域，请使用「复制正文」或只选一个标题';
+        if (callback) callback(false);
+        return;
+      }
+      var rng = paras.items[merged[0].start].getRange('Start').expandTo(
+        paras.items[merged[0].end].getRange('End')
+      );
+      rng.select();
+      return ctx.sync().then(function() {
+        if (callback) callback(true);
+      });
+    });
+  }).catch(function(err) {
+    statusBar.textContent = '选中正文失败: ' + err.message;
+    if (callback) callback(false);
+  });
+}
+
+function mergeRanges(ranges) {
+  if (ranges.length === 0) return [];
+  var sorted = ranges.slice().sort(function(a, b) { return a.start - b.start; });
+  var merged = [sorted[0]];
+  for (var i = 1; i < sorted.length; i++) {
+    var last = merged[merged.length - 1];
+    if (sorted[i].start <= last.end + 1) {
+      last.end = Math.max(last.end, sorted[i].end);
+    } else {
+      merged.push(sorted[i]);
+    }
+  }
+  return merged;
+}
+
+function gotoHeading(idx, evt) {
+  if (evt) evt.stopPropagation();
+  var pi = headings[idx].paraIdx;
+  statusBar.textContent = '正在跳转...';
+  Word.run(function(ctx) {
+    var p = ctx.document.body.paragraphs.getItemAt(pi);
+    p.select();
+    return ctx.sync().then(function() {
+      statusBar.textContent = '已跳转到: ' + headings[idx].text.substring(0, 40);
+    });
+  }).catch(function(err) {
+    statusBar.textContent = '跳转失败: ' + err.message;
+  });
+}
+
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

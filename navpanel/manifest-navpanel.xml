@@ -3,21 +3,23 @@
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="TaskPaneApp">
-  <Id>5F9A8B2C-3D4E-5F6A-8B7C-1E2D4F5A6B7C</Id>
-  <Version>1.2.4.0</Version>
-  <ProviderName>词汇增强助手</ProviderName>
+  <Id>9A2E8F1C-4D7B-4A5F-9C3E-1B6D4E8F0A2C</Id>
+  <Version>1.2.5.0</Version>
+  <ProviderName>导航面板</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
-  <DisplayName DefaultValue="词汇增强助手"/>
-  <Description DefaultValue="词汇统计与替换工具"/>
-  <SupportUrl DefaultValue="https://github.com/is13823168894/word-addin"/>
+  <DisplayName DefaultValue="标题导航面板"/>
+  <Description DefaultValue="文档标题导航工具，支持多选复制"/>
+  <IconUrl DefaultValue="http://localhost/word-addin/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="http://localhost/word-addin/icon-64.png"/>
+  <SupportUrl DefaultValue="http://localhost/word-addin/navpanel"/>
   <AppDomains>
-    <AppDomain>https://is13823168894.github.io</AppDomain>
+    <AppDomain>http://localhost</AppDomain>
   </AppDomains>
   <Hosts>
     <Host Name="Document"/>
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://is13823168894.github.io/word-addin/taskpane.html"/>
+    <SourceLocation DefaultValue="http://localhost/word-addin/navpanel/index.html"/>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -33,12 +35,22 @@
             <OfficeTab id="TabHome">
               <Group id="CommandsGroup">
                 <Label resid="CommandsGroup.Label"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16"/>
+                  <bt:Image size="32" resid="Icon.32x32"/>
+                  <bt:Image size="80" resid="Icon.80x80"/>
+                </Icon>
                 <Control xsi:type="Button" id="TaskpaneButton">
                   <Label resid="TaskpaneButton.Label"/>
                   <Supertip>
                     <Title resid="TaskpaneButton.SupertipTitle"/>
                     <Description resid="TaskpaneButton.SupertipText"/>
                   </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
                   <Action xsi:type="ShowTaskpane">
                     <TaskpaneId>ButtonId1</TaskpaneId>
                     <SourceLocation resid="Taskpane.Url"/>
@@ -51,19 +63,24 @@
       </Host>
     </Hosts>
     <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="http://localhost/word-addin/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="http://localhost/word-addin/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="http://localhost/word-addin/icon-80.png"/>
+      </bt:Images>
       <bt:Urls>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="http://go.microsoft.com/fwlink/?LinkId=276812"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://is13823168894.github.io/word-addin/taskpane.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="http://localhost/word-addin/navpanel/index.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="词汇增强助手"/>
-        <bt:String id="CommandsGroup.Label" DefaultValue="词汇工具"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="词汇增强"/>
-        <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="词汇增强助手"/>
+        <bt:String id="GetStarted.Title" DefaultValue="标题导航面板"/>
+        <bt:String id="CommandsGroup.Label" DefaultValue="标题导航"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="标题导航"/>
+        <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="标题导航面板"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="词汇统计与替换工具。请在 HOME 选项卡中点击'词汇增强'按钮开始使用。"/>
-        <bt:String id="TaskpaneButton.SupertipText" DefaultValue="打开词汇增强面板"/>
+        <bt:String id="GetStarted.Description" DefaultValue="列出文档所有标题，支持多选后批量复制。请在 HOME 选项卡中点击'标题导航'按钮开始使用。"/>
+        <bt:String id="TaskpaneButton.SupertipText" DefaultValue="打开标题导航面板"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

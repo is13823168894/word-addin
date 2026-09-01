@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="TaskPaneApp">
+  <Id>C5E8F2A3-6B4D-9E1F-8A3C-2D5E7F9A1B3D</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>表格工作台(x-spreadsheet)</ProviderName>
+  <DefaultLocale>zh-CN</DefaultLocale>
+  <DisplayName DefaultValue="表格工作台 (x-spread)"/>
+  <Description DefaultValue="使用 x-spreadsheet 引擎的 Word 表格工具，可与 Word 表格双向导入导出"/>
+  <IconUrl DefaultValue="https://localhost:8443/word-addin/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:8443/word-addin/icon-64.png"/>
+  <SupportUrl DefaultValue="https://localhost:8443/word-addin/excel/x-spreadsheet"/>
+  <AppDomains>
+    <AppDomain>https://localhost:8443</AppDomain>
+    <AppDomain>https://cdn.jsdelivr.net</AppDomain>
+    <AppDomain>https://appsforoffice.microsoft.com</AppDomain>
+  </AppDomains>
+  <Hosts>
+    <Host Name="Document"/>
+  </Hosts>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:8443/word-addin/excel/x-spreadsheet/index.html"/>
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Document">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title"/>
+            <Description resid="GetStarted.Description"/>
+            <LearnMoreUrl resid="GetStarted.LearnMoreUrl"/>
+          </GetStarted>
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="CommandsGroup">
+                <Label resid="CommandsGroup.Label"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16"/>
+                  <bt:Image size="32" resid="Icon.32x32"/>
+                  <bt:Image size="80" resid="Icon.80x80"/>
+                </Icon>
+                <Control xsi:type="Button" id="TaskpaneButton">
+                  <Label resid="TaskpaneButton.Label"/>
+                  <Supertip>
+                    <Title resid="TaskpaneButton.SupertipTitle"/>
+                    <Description resid="TaskpaneButton.SupertipText"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonId1</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:8443/word-addin/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:8443/word-addin/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:8443/word-addin/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://go.microsoft.com/fwlink/?LinkId=276812"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:8443/word-addin/excel/x-spreadsheet/index.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GetStarted.Title" DefaultValue="表格工作台 (x-spread)"/>
+        <bt:String id="CommandsGroup.Label" DefaultValue="表格工作台"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="表格工作台"/>
+        <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="在 Word 中打开表格工作台 (x-spreadsheet)"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="GetStarted.Description" DefaultValue="在 Word 侧栏嵌入电子表格，可写公式校验 Word 数据，校验结果一键写回 Word 表格。请在 HOME 选项卡中点击'表格工作台'按钮开始使用。"/>
+        <bt:String id="TaskpaneButton.SupertipText" DefaultValue="打开表格工作台：支持双向导入导出与公式校验"/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

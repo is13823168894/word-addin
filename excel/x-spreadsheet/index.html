@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>表格工作台</title>
+<link rel="stylesheet" href="xspreadsheet.css">
+<style>
+html,body{height:100%;margin:0;padding:0;overflow:hidden;}
+body{display:flex;flex-direction:column;font-family:"Microsoft YaHei",sans-serif;font-size:12px;color:#333;background:#fff;}
+.toolbar{padding:6px 8px;border-bottom:1px solid #ddd;background:#f3f3f3;display:flex;gap:5px;flex-wrap:wrap;align-items:center;flex-shrink:0;}
+.toolbar button{padding:5px 10px;font-size:12px;cursor:pointer;border:1px solid #bbb;border-radius:3px;background:#fff;color:#333;white-space:nowrap;line-height:1.2;}
+.toolbar button:hover{background:#e8e8e8;}
+.toolbar button:disabled{opacity:.5;cursor:not-allowed;}
+.toolbar button.accent{background:#2b579a;color:#fff;border-color:#2b579a;}
+.toolbar button.accent:hover{background:#1e3f6f;}
+.toolbar .sep{width:1px;background:#ccc;align-self:stretch;margin:0 4px;}
+.toolbar .hint{font-size:11px;color:#777;margin-left:6px;}
+#sheet{flex:1 1 auto;min-height:300px;overflow:hidden;background:#fff;position:relative;}
+.fallback{padding:30px 20px;text-align:center;color:#888;font-size:13px;line-height:1.8;}
+.fallback code{background:#f0f0f0;padding:1px 5px;border-radius:2px;font-family:Consolas,monospace;color:#c7254e;}
+.status{padding:5px 10px;border-top:1px solid #ddd;background:#f7f7f7;font-size:11px;color:#555;flex-shrink:0;min-height:22px;line-height:1.4;}
+.status.ok{color:#0a7a2a;}
+.status.err{color:#c0392b;}
+.status.working{color:#2b579a;}
+/* 隐藏x-spreadsheet的logo以腾出空间 */
+.x-spreadsheet .info{display:none !important;}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="accent" id="btnImport" onclick="importWordTable()" title="读取 Word 文档当前表格，写入工作表">Word → 表</button>
+  <button id="btnNext" onclick="importNextTable()" title="导入下一个 Word 表格">下一个 ›</button>
+  <button class="accent" id="btnExport" onclick="exportToWord()" title="把工作表作为 Word 表格插入到光标位置">表 → Word</button>
+  <span class="sep"></span>
+  <button id="btnSample" onclick="loadSample()" title="加载示例数据，含 SUM / IF 公式">示例数据</button>
+  <button id="btnClear" onclick="clearSheet()" title="清空（自动备份到撤销栈）">清空</button>
+  <button id="btnUndo" onclick="undoLast()" title="恢复清空前的数据">撤销</button>
+  <span class="sep"></span>
+  <button id="btnCopyTsv" onclick="copyTSV()" title="把工作表复制为 TSV">复制 TSV</button>
+  <button id="btnPasteBox" onclick="showPasteBox('将 Excel/WPS 里的单元格 Ctrl+V 粘到下方框，然后点确认：')" title="手动粘贴 TSV（iframe 内不受限）">粘贴框</button>
+  <span class="hint">提示：在工作表里编辑公式（如 <code style="background:#eef;padding:0 3px;">=SUM(A1:A10)</code>）实时计算，校验完用「表 → Word」写回</span>
+</div>
+
+<div id="sheet">
+  <div class="fallback" id="loadingHint">正在加载电子表格组件（首次需要联网下载）…<br>如果长时间未加载，请检查网络或使用 HTTPS 启动加载项</div>
+</div>
+
+<div class="status" id="status">初始化中…</div>
+
+<!-- 粘贴框：iframe 内 clipboard.readText 多半被禁，这里强制用 DOM 文本框做兜底 -->
+<div id="pasteBox" style="display:none;position:absolute;left:8px;right:8px;bottom:30px;z-index:50;background:#fffbea;border:1px solid #c9a227;border-radius:4px;padding:8px;box-shadow:0 4px 12px rgba(0,0,0,.18);font-family:&quot;Microsoft YaHei&quot;,sans-serif;font-size:12px;">
+  <div id="pasteMsg" style="margin-bottom:6px;color:#444;">将 Excel/WPS 里的单元格 Ctrl+V 粘到下方框，然后点确认：</div>
+  <textarea id="pasteTA" placeholder="例如：&#10;产品&#9;数量&#9;单价&#10;A&#9;10&#9;50&#10;B&#9;5&#9;200" style="width:100%;height:100px;border:1px solid #ccc;font-family:Consolas,monospace;font-size:12px;padding:4px;box-sizing:border-box;resize:vertical;"></textarea>
+  <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end;">
+    <button onclick="confirmPasteBox()" style="padding:4px 14px;background:#2b579a;color:#fff;border:1px solid #1e3f6f;border-radius:3px;cursor:pointer;">确认导入</button>
+    <button onclick="hidePasteBox()" style="padding:4px 14px;background:#fff;border:1px solid #999;border-radius:3px;cursor:pointer;">取消</button>
+  </div>
+</div>
+
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="xspreadsheet.js"></script>
+<script>
+/* =====================================================
+   表格工作台 - Word 加载项
+   单文件实现，电子表格组件: x-spreadsheet (MIT, Canvas)
+   ===================================================== */
+
+var xs = null;
+var sheetEl = null;
+var statusEl = null;
+var isReady = false;
+
+function setStatus(msg, type) {
+  if (!statusEl) return;
+  statusEl.textContent = msg;
+  statusEl.className = 'status' + (type ? (' ' + type) : '');
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function setReady(ready) {
+  isReady = ready;
+  var ids = ['btnImport','btnNext','btnExport','btnSample','btnClear','btnUndo','btnCopyTsv','btnPasteBox'];
+  for (var i = 0; i < ids.length; i++) {
+    var b = document.getElementById(ids[i]);
+    if (b) b.disabled = !ready;
+  }
+}
+
+// =============================
+// 初始化
+// =============================
+function initSheet() {
+  sheetEl = document.getElementById('sheet');
+  statusEl = document.getElementById('status');
+
+  if (typeof x_spreadsheet !== 'function') {
+    sheetEl.innerHTML = '<div class="fallback">'
+      + '<p><strong>电子表格组件库加载失败</strong></p>'
+      + '<p>可能原因：</p>'
+      + '<p>1. 本地文件 <code>xspreadsheet.js</code> 或 <code>xspreadsheet.css</code> 缺失</p>'
+      + '<p>2. 浏览器缓存问题</p>'
+      + '<p>建议：确认 <code>xspreadsheet.js</code> 和 <code>xspreadsheet.css</code> 在加载项同目录下。</p></div>';
+    setStatus('组件加载失败', 'err');
+    return;
+  }
+
+  try {
+    xs = x_spreadsheet(sheetEl, {
+      showToolbar: true,
+      showGrid: true,
+      showContextmenu: true,
+      view: {
+        height: function() { return Math.max(280, sheetEl.clientHeight); },
+        width: function() { return Math.max(280, sheetEl.clientWidth); }
+      },
+      row: { len: 200, height: 25 },
+      col: { len: 30, width: 80, indexWidth: 60, maxWidth: 200 }
+    });
+
+    xs.loadData({ name: 'sheet1', rows: {} });
+
+    // 隐藏 loading 提示
+    var hint = document.getElementById('loadingHint');
+    if (hint) hint.style.display = 'none';
+
+    setReady(true);
+    setStatus('就绪', 'ok');
+  } catch (e) {
+    sheetEl.innerHTML = '<div class="fallback">初始化失败：' + escHtml(e.message) + '</div>';
+    setStatus('初始化失败: ' + e.message, 'err');
+  }
+}
+
+Office.onReady(function(info) {
+  if (!sheetEl) initSheet();
+  if (isReady) setStatus('就绪（' + (info.host || 'Word') + '）', 'ok');
+});
+
+// =============================
+// 旧的 importWordTable 已被下方重写版本取代
+// 本实现已迁移到 file 末尾的 importWordTable / importNextTable / _doImport
+
+
+// =============================
+// 工作表 → Word：在光标位置插入 Word 表格
+// =============================
+function exportToWord() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+
+  setStatus('正在生成 Word 表格…', 'working');
+
+  try {
+    var data = xs.getData();
+    var sheet = data && data[0];
+    var maxR = -1, maxC = -1;
+
+    if (sheet && sheet.rows) {
+      for (var k in sheet.rows) {
+        if (!Object.prototype.hasOwnProperty.call(sheet.rows, k)) continue;
+        var r = parseInt(k, 10);
+        if (!isNaN(r) && r > maxR) maxR = r;
+        var rowObj = sheet.rows[k];
+        if (rowObj && rowObj.cells) {
+          for (var ck in rowObj.cells) {
+            if (!Object.prototype.hasOwnProperty.call(rowObj.cells, ck)) continue;
+            var c = parseInt(ck, 10);
+            if (!isNaN(c) && c > maxC) maxC = c;
+          }
+        }
+      }
+    }
+
+    if (maxR < 0 || maxC < 0) {
+      setStatus('工作表为空，无法导出。请先填入数据或加载示例。', 'err');
+      return;
+    }
+
+    // 构建 HTML 表格（Word 会识别为真实表格）
+    var html = '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:宋体;font-size:11pt;">';
+    for (var r = 0; r <= maxR; r++) {
+      html += '<tr>';
+      var rowObj = (sheet.rows && sheet.rows[r]) || { cells: {} };
+      for (var c = 0; c <= maxC; c++) {
+        var cellObj = rowObj.cells && rowObj.cells[c];
+        var text = (cellObj && cellObj.text != null) ? String(cellObj.text) : '';
+        // 把单元格内的换行转成 <br>
+        var cellHtml = escHtml(text).replace(/\r?\n/g, '<br>');
+        // 表头加粗（第一行）
+        if (r === 0) {
+          html += '<td style="border:1px solid #888;padding:4px;background:#f0f0f0;font-weight:bold;">' + cellHtml + '</td>';
+        } else {
+          html += '<td style="border:1px solid #888;padding:4px;">' + cellHtml + '</td>';
+        }
+      }
+      html += '</tr>';
+    }
+    html += '</table><p></p>';
+
+    Word.run(function(ctx) {
+      var sel = ctx.document.getSelection();
+      sel.insertHtml(html, Word.InsertLocation.replace);
+      return ctx.sync().then(function() {
+        setStatus('已导出 ' + (maxR + 1) + ' 行 × ' + (maxC + 1) + ' 列到 Word（光标位置）', 'ok');
+      });
+    }).catch(function(err) {
+      setStatus('导出失败：' + err.message, 'err');
+    });
+  } catch (e) {
+    setStatus('导出失败：' + e.message, 'err');
+  }
+}
+
+// =============================
+// 2D 数组 → 工作表 (内部共用)
+// =============================
+function loadDataIntoSheet(data2d) {
+  var rows = {};
+  for (var r = 0; r < data2d.length; r++) {
+    var cells = data2d[r];
+    var rowData = { cells: {} };
+    if (!cells) { rows[r] = rowData; continue; }
+    for (var c = 0; c < cells.length; c++) {
+      var val = cells[c];
+      if (val == null) val = '';
+      val = String(val);
+      rowData.cells[c] = { text: val };
+    }
+    rows[r] = rowData;
+  }
+  xs.loadData({
+    name: 'sheet1',
+    rows: rows
+  });
+}
+
+// 提取工作表为 2D 字符串数组（用于 TSV）
+function getSheetData2D() {
+  var data = xs.getData();
+  var sheet = data && data[0];
+  var maxR = -1, maxC = -1;
+  if (sheet && sheet.rows) {
+    for (var k in sheet.rows) {
+      if (!Object.prototype.hasOwnProperty.call(sheet.rows, k)) continue;
+      var r = parseInt(k, 10);
+      if (!isNaN(r) && r > maxR) maxR = r;
+      var rowObj = sheet.rows[k];
+      if (rowObj && rowObj.cells) {
+        for (var ck in rowObj.cells) {
+          if (!Object.prototype.hasOwnProperty.call(rowObj.cells, ck)) continue;
+          var c = parseInt(ck, 10);
+          if (!isNaN(c) && c > maxC) maxC = c;
+        }
+      }
+    }
+  }
+  if (maxR < 0) return { rows: [], maxR: -1, maxC: -1 };
+
+  var rows2d = [];
+  for (var r = 0; r <= maxR; r++) {
+    var arr = [];
+    var rowObj = (sheet.rows && sheet.rows[r]) || { cells: {} };
+    for (var c = 0; c <= maxC; c++) {
+      var cellObj = rowObj.cells && rowObj.cells[c];
+      var text = (cellObj && cellObj.text != null) ? String(cellObj.text) : '';
+      arr.push(text);
+    }
+    rows2d.push(arr);
+  }
+  return { rows: rows2d, maxR: maxR, maxC: maxC };
+}
+
+// =============================
+// TSV 复制 / 粘贴
+// =============================
+function copyTSV() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); return; }
+  try {
+    var info = getSheetData2D();
+    if (info.maxR < 0) {
+      setStatus('工作表为空，无可复制内容', 'err');
+      return;
+    }
+    var lines = [];
+    for (var i = 0; i < info.rows.length; i++) {
+      var cols = info.rows[i];
+      var tsvCols = [];
+      for (var j = 0; j < cols.length; j++) {
+        tsvCols.push(String(cols[j] == null ? '' : cols[j]).replace(/\t/g, ' ').replace(/\r?\n/g, ' '));
+      }
+      lines.push(tsvCols.join('\t'));
+    }
+    var tsv = lines.join('\r\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(tsv).then(function() {
+        setStatus('已复制 ' + lines.length + ' 行 × ' + (info.maxC + 1) + ' 列到剪贴板（TSV，可粘贴到 Excel/WPS）', 'ok');
+      }).catch(function() {
+        fallbackCopyTsv(tsv, lines.length);
+      });
+    } else {
+      fallbackCopyTsv(tsv, lines.length);
+    }
+  } catch (e) {
+    setStatus('复制失败：' + e.message, 'err');
+  }
+}
+
+function fallbackCopyTsv(text, count) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  var ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+  setStatus(ok ? ('已复制 ' + count + ' 行（TSV）') : '复制失败，请手动复制', ok ? 'ok' : 'err');
+}
+
+// pasteTSV 已被「粘贴框」按钮替代（直接用 DOM 文本框，不依赖 clipboard API）。
+// 想粘贴 TSV，点工具栏的「粘贴框」按钮即可。
+
+function parseTSV(text) {
+  // 简单按行 + \t 切分（不处理嵌套引号；够用）
+  var lines = text.split(/\r?\n/);
+  var data = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    // 跳过末尾一个空行
+    if (line === '' && i === lines.length - 1) continue;
+    data.push(line.split('\t'));
+  }
+  return data;
+}
+
+// =============================
+// 示例 / 清空 / 撤销 / 下一表 / 粘贴框
+// =============================
+
+// 全局撤销栈（只存清空、覆盖类操作的快照，最多 20 步）
+var _undoStack = [];
+var _curTableIdx = -1;          // 当前在文档中第几个表格
+var _totalTables = 0;            // 文档表格总数
+
+function loadSample() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); return; }
+  var sample = [
+    ['产品', '数量', '单价', '金额', '校验'],
+    ['A', 10, 50, '=B2*C2', '=IF(D2>400,"通过","未达")'],
+    ['B', 5, 200, '=B3*C3', '=IF(D3>400,"通过","未达")'],
+    ['C', 3, 800, '=B4*C4', '=IF(D4>400,"通过","未达")'],
+    ['合计', '=SUM(B2:B4)', '', '=SUM(D2:D4)', '=COUNTIF(E2:E4,"通过")&" 项通过"']
+  ];
+  pushUndo();
+  loadDataIntoSheet(sample);
+  setStatus('已加载示例：5 行 × 5 列，含 SUM / IF / COUNTIF 公式，可点击 D2、E2 查看实时计算', 'ok');
+}
+
+function pushUndo() {
+  if (!isReady) return;
+  try {
+    _undoStack.push(xs.getData());
+    if (_undoStack.length > 20) _undoStack.shift();
+  } catch (e) {}
+}
+
+function clearSheet() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); return; }
+  // 注意：confirm() 在 Office 任务面板 iframe 中被屏蔽，
+  // 因此直接清空 + 自动备份到撤销栈即可
+  pushUndo();
+  xs.loadData({ name: 'sheet1', rows: {} });
+  setStatus('已清空（可点「撤销」恢复）', 'ok');
+}
+
+function undoLast() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); return; }
+  if (_undoStack.length === 0) {
+    setStatus('没有可撤销的操作', 'err');
+    return;
+  }
+  var data = _undoStack.pop();
+  try {
+    xs.loadData(data);
+    setStatus('已撤销（撤销栈剩余 ' + _undoStack.length + ' 步）', 'ok');
+  } catch (e) {
+    setStatus('撤销失败：' + e.message, 'err');
+  }
+}
+
+function importWordTable() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  setStatus('正在读取 Word 表格…', 'working');
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    return ctx.sync().then(function() {
+      if (!tables.items || tables.items.length === 0) {
+        setStatus('文档中没有表格，请先把内容做成 Word 表格', 'err');
+        return;
+      }
+      _totalTables = tables.items.length;
+      _curTableIdx = 0;
+      // 同步加载第一个表格的 values
+      var tbl = tables.items[0];
+      tbl.load('values');
+      return ctx.sync().then(function() {
+        var data2d = tbl.values;
+        if (!data2d || data2d.length === 0) {
+          setStatus('第 1 个表格为空', 'err');
+          return;
+        }
+        pushUndo();
+        loadDataIntoSheet(data2d);
+        var cols = data2d[0] ? data2d[0].length : 0;
+        setStatus('已导入第 1 / ' + tables.items.length + ' 个表格：'
+          + data2d.length + ' 行 × ' + cols + ' 列（点「下一个 ›」继续循环导入）', 'ok');
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + err.message, 'err');
+  });
+}
+
+function importNextTable() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  if (_totalTables === 0) {
+    setStatus('请先点「Word → 表」初始化表格列表', 'err');
+    return;
+  }
+  var nextIdx = _curTableIdx + 1;
+  if (nextIdx >= _totalTables) {
+    setStatus('已是最后一个表格（第 ' + _totalTables + ' 个，共 ' + _totalTables + ' 个）', 'err');
+    return;
+  }
+  setStatus('正在读取第 ' + (nextIdx + 1) + ' / ' + _totalTables + ' 个表格…', 'working');
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    return ctx.sync().then(function() {
+      var tbl = tables.items[nextIdx];
+      tbl.load('values');
+      return ctx.sync().then(function() {
+        var data2d = tbl.values;
+        if (!data2d || data2d.length === 0) {
+          setStatus('第 ' + (nextIdx + 1) + ' 个表格为空', 'err');
+          return;
+        }
+        pushUndo();
+        loadDataIntoSheet(data2d);
+        var cols = data2d[0] ? data2d[0].length : 0;
+        _curTableIdx = nextIdx;
+        setStatus('已导入第 ' + (nextIdx + 1) + ' / ' + tables.items.length
+          + ' 个表格：' + data2d.length + ' 行 × ' + cols + ' 列', 'ok');
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + err.message, 'err');
+  });
+}
+
+// ============================================================
+// 粘贴框（DOM 文本框，绕过 iframe 的 clipboard 权限限制）
+// ============================================================
+
+function showPasteBox(msg) {
+  var box = document.getElementById('pasteBox');
+  var msgEl = document.getElementById('pasteMsg');
+  var ta = document.getElementById('pasteTA');
+  if (msgEl && msg) msgEl.textContent = msg;
+  if (ta) { ta.value = ''; }
+  if (box) {
+    box.style.display = 'block';
+    if (ta) setTimeout(function() { ta.focus(); }, 50);
+  }
+}
+
+function hidePasteBox() {
+  var box = document.getElementById('pasteBox');
+  if (box) box.style.display = 'none';
+}
+
+function confirmPasteBox() {
+  if (!isReady) { setStatus('工作表未就绪', 'err'); hidePasteBox(); return; }
+  var ta = document.getElementById('pasteTA');
+  var text = ta ? ta.value : '';
+  if (!text) { setStatus('文本框为空，先 Ctrl+V 粘点内容', 'err'); return; }
+  pushUndo();
+  var data2d = parseTSV(text);
+  if (data2d.length === 0) {
+    setStatus('未检测到制表符（必须是 Excel/WPS 复制出来的：列用 \\t、换行用 \\n）', 'err');
+    return;
+  }
+  loadDataIntoSheet(data2d);
+  var maxC = 0;
+  for (var i = 0; i < data2d.length; i++) {
+    if (data2d[i].length > maxC) maxC = data2d[i].length;
+  }
+  setStatus('已粘贴 ' + data2d.length + ' 行 × ' + maxC + ' 列', 'ok');
+  hidePasteBox();
+}
+</script>
+</body>
+</html>

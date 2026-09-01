@@ -1,0 +1,6 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Microsoft\Office\16.0\WEF\TrustedCatalogs\{C1D2E3F4-A5B6-7890-CDEF-123456789012}]
+"Id"="{C1D2E3F4-A5B6-7890-CDEF-123456789012}"
+"Url"="E:\\A001 重要软件\\OFFICE加载项\\word-addin\\copy"
+"Flags"=dword:00000001

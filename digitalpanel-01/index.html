@@ -1,0 +1,2169 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>数字面板</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 10px; margin: 0; }
+        textarea { font-family: Consolas, monospace; font-size: 13px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        button { padding: 8px 16px; margin-right: 6px; cursor: pointer; border-radius: 4px; border: none; font-size: 12px; }
+
+        .np-title { font-size: 14px; font-weight: bold; color: #2b579a; margin-bottom: 8px; }
+        .np-modes { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+        .np-mode-btn {
+            padding: 5px 12px; font-size: 12px; border: 1px solid #ccc; background: white;
+            border-radius: 14px; cursor: pointer; transition: all 0.2s;
+        }
+        .np-mode-btn:hover { border-color: #2b579a; color: #2b579a; }
+        .np-mode-btn.active { background: #2b579a; color: white; border-color: #2b579a; }
+        .np-input {
+            width: 100%; box-sizing: border-box; min-height: 100px;
+            font-family: Consolas, monospace; font-size: 13px; padding: 8px;
+            border: 1px solid #ccc; border-radius: 4px; resize: vertical;
+        }
+        .np-input:focus { border-color: #2b579a; outline: none; }
+        .np-result {
+            margin-top: 10px; padding: 10px; background: #f8f9fa;
+            border-left: 3px solid #2b579a; border-radius: 2px;
+            min-height: 200px; max-height: 400px; overflow-y: auto;
+        }
+        .np-result-title { font-size: 12px; font-weight: bold; color: #333; margin-bottom: 6px; position: sticky; top: 0; background: #f8f9fa; }
+        .np-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .np-table th {
+            background: #eef2f7; padding: 6px 8px; text-align: left;
+            font-weight: 600; color: #555; border-bottom: 2px solid #d0d7de;
+        }
+        .np-table td {
+            padding: 5px 8px; border-bottom: 1px solid #eaecef; color: #333;
+        }
+        .np-table tr:hover td { background: #f1f3f5; }
+        .np-num { font-family: Consolas, monospace; text-align: right; }
+        .np-diff-pos { color: #1a7f37; }
+        .np-diff-neg { color: #cf222e; }
+        .np-diff-zero { color: #888; }
+        .np-pct { font-weight: 600; }
+        .np-empty { color: #999; font-size: 12px; text-align: center; padding: 12px; }
+        .np-error { color: #cf222e; font-size: 12px; padding: 6px; background: #fff6f6; border-radius: 3px; }
+
+        /* 表格验证选项 */
+        .np-options { margin-bottom: 8px; padding: 8px; background: #f0f4f8; border-radius: 4px; font-size: 12px; }
+        .np-options label { display: block; margin: 3px 0; cursor: pointer; }
+        .np-options .col-checks { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; }
+        .np-options .col-checks label { display: inline-flex; align-items: center; gap: 3px; margin: 0; font-size: 11px; }
+        .np-verify-pass { color: #1a7f37; }
+        .np-verify-fail { color: #cf222e; }
+        .np-verify-warn { color: #d4a72c; }
+        .np-verify-row { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px; border-radius: 2px; }
+        .np-verify-row:nth-child(odd) { background: #f8fbff; }
+        .np-verify-row:nth-child(even) { background: #fff; }
+        .np-verify-row:last-child { border-bottom: none; }
+        .np-verify-label { color: #1a5276; font-weight: 600; }
+        .np-verify-detail { font-family: Consolas, monospace; color: #333; word-break: break-all; white-space: normal; }
+        .np-verify-value { color: #c0392b; font-weight: 500; }
+        .np-verify-formula { color: #27ae60; font-size: 11px; font-family: Consolas, monospace; }
+        .np-verify-diff { font-weight: 600; }
+        .np-summary { margin-top: 8px; padding: 6px 8px; background: #eef2f7; border-radius: 3px; font-size: 12px; }
+        .np-badge { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: bold; margin-left: 4px; }
+        .np-badge-ok { background: #d4edda; color: #1a7f37; }
+        .np-badge-fail { background: #f8d7da; color: #cf222e; }
+        .np-badge-warn { background: #fff3cd; color: #d4a72c; }
+    </style>
+</head>
+<body>
+    <div class="np-title">数字面板</div>
+    <div class="np-modes" id="npModes"></div>
+    <div class="np-options" id="npOptions" style="display:none;"></div>
+    <textarea id="npInput" class="np-input" placeholder="粘贴数字，每行一个，例如：&#10;8,135.55&#10;10,988.98&#10;12,674.42"></textarea>
+    <div class="np-result" id="npResult" style="display:none;">
+        <div class="np-result-title" id="npResultTitle">计算结果</div>
+        <div id="npResultContent"></div>
+    </div>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    // ========== 数字解析器 ==========
+    function parseNumber(str) {
+        if (!str) return null;
+        var s = String(str).trim();
+        if (!s) return null;
+        var negative = false;
+        if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1); }
+        s = s.replace(/,/g, '').replace(/\s/g, '').replace(/\u3001/g, '');
+        var isPercent = false;
+        if (/%$/.test(s)) { isPercent = true; s = s.replace(/%$/, ''); }
+        var num = parseFloat(s);
+        if (isNaN(num)) return null;
+        if (negative) num = -num;
+        if (isPercent) num = num / 100;
+        return num;
+    }
+
+    function parseAllNumbers(text) {
+        var lines = text.split(/[\n\r]+/);
+        var results = [];
+        var errors = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) continue;
+            var parts = line.split(/[\t\uFF0C]+/);
+            if (parts.length === 1) {
+                var n = parseNumber(line);
+                if (n !== null) results.push(n);
+                else errors.push('第 ' + (results.length + errors.length + 1) + '行无法解析: ' + line);
+            } else {
+                for (var j = 0; j < parts.length; j++) {
+                    var p = parseNumber(parts[j]);
+                    if (p !== null) results.push(p);
+                    else errors.push('"' + parts[j] + '"无法解析');
+                }
+            }
+        }
+        return { numbers: results, errors: errors };
+    }
+
+    function formatNumber(num, decimals) {
+        if (num === null || num === undefined || isNaN(num)) return '--';
+        if (decimals === undefined) decimals = Math.abs(num) >= 1 ? 2 : 4;
+        return num.toLocaleString('en-US', {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+        });
+    }
+
+    function formatPercent(num) {
+        if (num === null || num === undefined || isNaN(num)) return '--';
+        return (num > 0 ? '+' : '') + num.toFixed(2) + '%';
+    }
+
+    function diffClass(val) {
+        if (val === null || val === undefined) return 'np-diff-zero';
+        if (val > 0) return 'np-diff-pos';
+        if (val < 0) return 'np-diff-neg';
+        return 'np-diff-zero';
+    }
+
+    // ========== 计算模式注册表 ==========
+    var npModes = {};
+    var npCurrentMode = 'diff-yoy';
+
+    function registerMode(id, config) { npModes[id] = config; }
+
+    registerMode('diff-yoy', {
+        name: 'N-1 / N-2 对比',
+        minInputs: 2,
+
+        calculate: function(numbers) {
+            var rows = [];
+            for (var i = 0; i < numbers.length; i++) {
+                var row = { index: i + 1, value: numbers[i] };
+                if (i >= 1) {
+                    var prev = numbers[i - 1];
+                    var curr = numbers[i];
+                    row.diffN1 = curr - prev;
+                    row.pctN1 = prev !== 0 ? ((curr - prev) / Math.abs(prev)) * 100 : null;
+                }
+                if (i >= 2) {
+                    var prev2 = numbers[i - 2];
+                    var curr2 = numbers[i];
+                    row.diffN2 = curr2 - prev2;
+                    row.pctN2 = prev2 !== 0 ? ((curr2 - prev2) / Math.abs(prev2)) * 100 : null;
+                }
+                rows.push(row);
+            }
+            return { rows: rows };
+        },
+
+        render: function(result) {
+            if (!result.rows || result.rows.length === 0) {
+                return '<div class="np-empty">暂无数据</div>';
+            }
+            var hasN2 = result.rows.length >= 3;
+            var html = '<table class="np-table"><thead><tr>';
+            html += '<th>#</th><th>数值</th><th>N-1</th><th>N-1变化率</th>';
+            if (hasN2) html += '<th>N-2</th><th>N-2变化率</th>';
+            html += '</tr></thead><tbody>';
+
+            for (var i = 0; i < result.rows.length; i++) {
+                var r = result.rows[i];
+                html += '<tr><td>' + r.index + '</td>';
+                html += '<td class="np-num">' + formatNumber(r.value) + '</td>';
+                if (i === 0) {
+                    html += '<td class="np-diff-zero">—</td><td class="np-diff-zero">—</td>';
+                    if (hasN2) html += '<td class="np-diff-zero">—</td><td class="np-diff-zero">—</td>';
+                } else {
+                    html += '<td class="np-num ' + diffClass(r.diffN1) + '">' +
+                        (r.diffN1 > 0 ? '+' : '') + formatNumber(r.diffN1) + '</td>';
+                    html += '<td class="np-num ' + diffClass(r.pctN1) + ' np-pct">' +
+                        (r.pctN1 !== null ? formatPercent(r.pctN1) : '—') + '</td>';
+                    if (hasN2) {
+                        if (r.diffN2 !== undefined) {
+                            html += '<td class="np-num ' + diffClass(r.diffN2) + '">' +
+                                (r.diffN2 > 0 ? '+' : '') + formatNumber(r.diffN2) + '</td>';
+                            html += '<td class="np-num ' + diffClass(r.pctN2) + ' np-pct">' +
+                                (r.pctN2 !== null ? formatPercent(r.pctN2) : '—') + '</td>';
+                        } else {
+                            html += '<td class="np-diff-zero">—</td><td class="np-diff-zero">—</td>';
+                        }
+                    }
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+
+            if (result.rows.length >= 2) {
+                var first = result.rows[0].value;
+                var last = result.rows[result.rows.length - 1].value;
+                var totalDiff = last - first;
+                var totalPct = first !== 0 ? (totalDiff / Math.abs(first)) * 100 : null;
+                html += '<div style="margin-top:8px;padding:6px 8px;background:#eef2f7;border-radius:3px;font-size:12px;">';
+                html += '<b>累计变化：</b>';
+                html += '<span class="' + diffClass(totalDiff) + ' np-pct">' +
+                    (totalDiff > 0 ? '+' : '') + formatNumber(totalDiff) + '</span>';
+                html += ' <span class="' + diffClass(totalPct) + ' np-pct">' +
+                    (totalPct !== null ? formatPercent(totalPct) : '—') + '</span>';
+                html += '</div>';
+            }
+            return html;
+        }
+    });
+
+    // ========== 表格验证模式 ==========
+    var npImportedData = null;
+    var npRowConfig = [];
+    var npSubStartConfig = []; // 每行是否"新子表开始"
+    // 初始快照：首次渲染时记录，供"恢复子表"/"恢复行类型"按钮回到初始状态
+    var npOrigRowConfig = null;
+    var npOrigSubStart = null;
+
+    function npDetectRowType(rowData, headers) {
+        if (!rowData || rowData.length === 0) return 'data';
+        var firstCell = rowData[0];
+        if (firstCell === null || firstCell === undefined) return 'data';
+        var label = String(firstCell).trim();
+        if (/减[：:]/.test(label)) return 'subtract';
+        return 'data';
+    }
+
+    registerMode('table-verify', {
+        name: '表格验证',
+        minInputs: 2,
+
+        options: function() {
+            return '<div id="npTableOptions">' +
+                '<button id="npBtnImport" style="margin-right:6px;padding:4px 10px;font-size:12px;background:#2b579a;color:white;border:none;border-radius:3px;cursor:pointer;">从Word导入</button>' +
+                '<span style="font-size:11px;color:#777;">选中Word表格任意单元格后点击</span>' +
+                '<div id="npImportStatus" style="margin-top:4px;font-size:11px;color:#888;"></div>' +
+                '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px;">' +
+                '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;">' +
+                '<input type="checkbox" id="npOptHasTotal" checked>' +
+                '<span>最后一行是合计行</span>' +
+                '</label>' +
+                '<label style="display:flex;align-items:center;gap:4px;">' +
+                '<input type="number" id="npOptHeaderRows" value="1" min="0" max="10" style="width:40px;padding:2px;font-size:12px;">' +
+                '<span>表头行数</span>' +
+                '</label>' +
+                '</div>' +
+                '<div id="npRowConfigArea" style="margin-top:6px;"></div>' +
+                '<div id="npColChecks" style="margin-top:6px;"></div>' +
+                '<div id="npPctConfig" style="margin-top:8px;border-top:1px solid #e5e5e5;padding-top:6px;"></div>' +
+            '</div>';
+        },
+
+        updateOptions: function(text) {
+            var rowArea = document.getElementById('npRowConfigArea');
+            var colArea = document.getElementById('npColChecks');
+            var pctConfig = document.getElementById('npPctConfig');
+            if (!rowArea) return;
+
+            var parsed = npImportedData || parseTable(text);
+            if (!parsed || !parsed.headers || parsed.headers.length === 0) {
+                rowArea.innerHTML = '';
+                colArea.innerHTML = '<span style="color:#999;">粘贴表格或点击「从Word导入」</span>';
+                if (pctConfig) pctConfig.innerHTML = '';
+                return;
+            }
+
+            // 保留已有配置（用户手动改过或上次会话恢复的），行数一致时优先沿用
+            var savedRowCfg = null;
+            var savedSubCfg = null;
+            if (npRowConfig && npRowConfig.length === parsed.dataRows.length) savedRowCfg = npRowConfig.slice();
+            if (npSubStartConfig && npSubStartConfig.length === parsed.dataRows.length) savedSubCfg = npSubStartConfig.slice();
+            npRowConfig = [];
+            npSubStartConfig = [];
+            var hasTotalEl = document.getElementById('npOptHasTotal');
+            var hasTotal = hasTotalEl ? hasTotalEl.checked : true;
+            var rowHtml = '<div style="color:#333;margin-bottom:3px;">行类型（自动识别，可修改，勾选「子表」表示新子表开始）：</div>';
+            for (var r = 0; r < parsed.dataRows.length; r++) {
+                var rowData = parsed.dataRows[r];
+                var rowType = npDetectRowType(rowData, parsed.headers);
+
+                // 子表标记行：行类型固定为普通（标记行计入子表求和，但不作为合计行）
+                var isSubStart = !!(savedSubCfg && savedSubCfg[r]);
+                var effRowType = isSubStart ? 'data' : (savedRowCfg && savedRowCfg[r] ? savedRowCfg[r] : rowType);
+                npRowConfig.push(effRowType);
+                // 同步"子表"勾选状态到内存数组，保证渲染后 npSubStartConfig 与界面一致，
+                // 否则会被清空并在保存时覆盖掉正确的勾选，刷新后丢失
+                npSubStartConfig.push(isSubStart);
+
+                // 使用textRows获取原始文本作为行标识
+                var rowLabel = '';
+                if (parsed.textRows && parsed.textRows[r]) {
+                    var textVal = parsed.textRows[r][0];
+                    if (textVal !== null && textVal !== undefined) {
+                        rowLabel = String(textVal).trim();
+                    }
+                }
+                if (!rowLabel && rowData[0] !== null && rowData[0] !== undefined) {
+                    rowLabel = String(rowData[0]).trim();
+                }
+                if (!rowLabel) rowLabel = '第' + (r + 1) + '行';
+
+                var displayLabel = '[' + (r + 1) + '] ' + rowLabel;
+
+                // 子表复选框 + 三个单选按钮
+                var name = 'npRowType_' + r;
+                rowHtml += '<div style="display:flex;align-items:center;margin-bottom:2px;font-size:12px;">' +
+                    '<label style="margin-right:6px;cursor:pointer;white-space:nowrap;color:#2b579a;" title="勾选后，该行及后续行视为新子表">' +
+                    '<input type="checkbox" class="np-sub-start" data-row="' + r + '" style="width:14px;height:14px;vertical-align:middle;margin:0 4px 0 0;-webkit-appearance:checkbox;appearance:checkbox;"' + (isSubStart ? ' checked' : '') + '> 子表</label>' +
+                    '<span style="width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#555;" title="' + displayLabel + '">' + displayLabel + '</span>' +
+                    '<span style="display:inline-flex;white-space:nowrap;">' +
+                    '<label style="margin-right:6px;cursor:pointer;display:inline;"><input type="radio" name="' + name + '" value="data" data-row="' + r + '" class="np-row-radio"' + (effRowType === 'data' ? ' checked' : '') + '> 普通</label>' +
+                    '<label style="margin-right:6px;cursor:pointer;display:inline;"><input type="radio" name="' + name + '" value="ignore" data-row="' + r + '" class="np-row-radio"' + (effRowType === 'ignore' ? ' checked' : '') + '> 无关</label>' +
+                    '<label style="cursor:pointer;display:inline;"><input type="radio" name="' + name + '" value="subtract" data-row="' + r + '" class="np-row-radio"' + (effRowType === 'subtract' ? ' checked' : '') + '> 减数</label>' +
+                    '</span></div>';
+            }
+            // 首次渲染时记录初始快照（恢复按钮使用），之后用户修改不再覆盖
+            if (npOrigRowConfig === null) npOrigRowConfig = npRowConfig.slice();
+            if (npOrigSubStart === null) npOrigSubStart = npSubStartConfig.slice();
+            // ===== 自动标记（按第一列关键词 + 偏移量） =====
+            var autoMarkHtml = '<div style="margin-top:8px;padding-top:6px;border-top:1px dashed #ccc;color:#333;font-size:12px;">' +
+                '<div style="font-weight:bold;margin-bottom:4px;color:#2b579a;">自动标记列</div>' +
+                '<div style="margin-bottom:3px;"><span style="color:#555;">关键词（匹配第一列）:</span> ' +
+                '<input type="text" id="npAutoKeyword" placeholder="输入关键词" style="width:120px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;"></div>' +
+                '<div style="margin-bottom:3px;"><span style="color:#555;">偏移量:</span> ' +
+                '<input type="number" id="npAutoOffset" value="0" style="width:60px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;"> ' +
+                '<span style="font-size:11px;color:#777;">0=当前行,1=下一行 ,-1=上一行</span></div>' +
+                '<div style="margin-bottom:3px;"><span style="color:#555;">标记模式:</span> ' +
+                '<select id="npAutoMarkMode" style="font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;width:120px;">' +
+                '<option value="sub">子表</option><option value="data">普通</option><option value="ignore">无关</option><option value="subtract">减数</option></select></div>' +
+                '<button id="npBtnAutoMark" style="font-size:12px;padding:3px 10px;background:#2b579a;color:#fff;border:none;border-radius:3px;cursor:pointer;">自动标记</button>' +
+                '<button id="npBtnRestoreSub" style="font-size:12px;padding:3px 10px;background:#777;color:#fff;border:none;border-radius:3px;cursor:pointer;margin-left:4px;">恢复子表</button>' +
+                '<button id="npBtnRestoreRow" style="font-size:12px;padding:3px 10px;background:#777;color:#fff;border:none;border-radius:3px;cursor:pointer;margin-left:4px;">恢复行类型</button>' +
+                '<span id="npAutoMarkMsg" style="font-size:11px;color:#777;margin-left:6px;"></span></div>';
+
+            rowArea.innerHTML = rowHtml + autoMarkHtml;
+
+            // 绑定恢复子表
+            var btnRestoreSub = document.getElementById('npBtnRestoreSub');
+            if (btnRestoreSub) {
+                btnRestoreSub.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    if (npOrigSubStart && npOrigSubStart.length) npSubStartConfig = npOrigSubStart.slice();
+                    else for (var rs = 0; rs < npSubStartConfig.length; rs++) npSubStartConfig[rs] = false;
+                    document.getElementById('npAutoMarkMsg').textContent = '子表已恢复';
+                    var subChecks = document.querySelectorAll('.np-sub-start');
+                    for (var ci = 0; ci < subChecks.length; ci++) {
+                        var idx = parseInt(subChecks[ci].getAttribute('data-row') || subChecks[ci].dataset.row || ci);
+                        if (!isNaN(idx) && npSubStartConfig && idx < npSubStartConfig.length) {
+                            subChecks[ci].checked = !!npSubStartConfig[idx];
+                        }
+                    }
+                    npSaveState();
+                });
+            }
+            // 绑定恢复行类型
+            var btnRestoreRow = document.getElementById('npBtnRestoreRow');
+            if (btnRestoreRow) {
+                btnRestoreRow.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    if (npOrigRowConfig && npOrigRowConfig.length) npRowConfig = npOrigRowConfig.slice();
+                    document.getElementById('npAutoMarkMsg').textContent = '行类型已恢复';
+                    var radios = document.querySelectorAll('.np-row-radio');
+                    for (var ri = 0; ri < radios.length; ri++) {
+                        var rIdx = parseInt(radios[ri].getAttribute('data-row') || radios[ri].dataset.row || ri);
+                        var val = radios[ri].value;
+                        if (!isNaN(rIdx) && npRowConfig && rIdx < npRowConfig.length) {
+                            radios[ri].checked = (npRowConfig[rIdx] === val);
+                        }
+                    }
+                    npSaveState();
+                });
+            }
+
+            // 绑定自动标记按钮
+            var btnAuto = document.getElementById('npBtnAutoMark');
+            if (btnAuto) {
+                btnAuto.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    var keyword = (document.getElementById('npAutoKeyword') ? document.getElementById('npAutoKeyword').value : '').trim();
+                    var offsetVal = parseInt(document.getElementById('npAutoOffset') ? document.getElementById('npAutoOffset').value : '0');
+                    if (!keyword) { document.getElementById('npAutoMarkMsg').textContent = '请输入关键词'; return; }
+                    if (isNaN(offsetVal) || (offsetVal !== -1 && offsetVal !== 0 && offsetVal !== 1)) { document.getElementById('npAutoMarkMsg').textContent = '偏移量只能是 -1/0/1'; return; }
+                    var msgEl = document.getElementById('npAutoMarkMsg');
+                    msgEl.textContent = '已标记';
+                    var parsed2 = (typeof npCalculate !== 'undefined' && npCalculate.parsed) ? npCalculate.parsed : parsed;
+                    if (!parsed2 || !parsed2.dataRows) { msgEl.textContent = '无数据'; return; }
+                    for (var ar = 0; ar < parsed2.dataRows.length; ar++) {
+                        var firstColText = '';
+                        if (parsed2.textRows && parsed2.textRows[ar] && parsed2.textRows[ar][0] !== null && parsed2.textRows[ar][0] !== undefined) {
+                            firstColText = String(parsed2.textRows[ar][0]).trim();
+                        } else if (parsed2.dataRows[ar][0] !== null && parsed2.dataRows[ar][0] !== undefined) {
+                            firstColText = String(parsed2.dataRows[ar][0]).trim();
+                        }
+                        if (firstColText.indexOf(keyword) >= 0) {
+                            var targetRow = ar + offsetVal;
+                            if (targetRow >= 0 && targetRow < parsed2.dataRows.length) {
+                                var modeSel = document.getElementById('npAutoMarkMode');
+                                var markMode = modeSel ? modeSel.value : 'sub';
+                                if (markMode === 'sub') {
+                                    npSubStartConfig[targetRow] = true;
+                                } else {
+                                    // 标记行类型（普通/无关/减数）：数组 + 现有 DOM 同步
+                                    if (npRowConfig && targetRow < npRowConfig.length) npRowConfig[targetRow] = markMode;
+                                    // 直接操作已有单选按钮（Word WebView 可靠）
+                                    var radiosAll = document.querySelectorAll('.np-row-radio[data-row="' + targetRow + '"]');
+                                    for (var r2 = 0; r2 < radiosAll.length; r2++) {
+                                        radiosAll[r2].checked = (radiosAll[r2].value === markMode);
+                                    }
+                                }
+                                npSaveState();
+                            }
+                        }
+                    }
+                    msgEl.textContent = '标记完成';
+                });
+            }
+
+            // 绑定单选事件
+            var radios = rowArea.querySelectorAll('.np-row-radio');
+            for (var ri = 0; ri < radios.length; ri++) {
+                radios[ri].addEventListener('change', function(e) {
+                    var row = parseInt(e.target.dataset.row);
+                    var val = e.target.value;
+                    // 子表标记行的行类型固定为普通，不允许手动修改
+                    if (npSubStartConfig[row]) return;
+                    npRowConfig[row] = val;
+                    npCalculate();
+                });
+            }
+
+            // 绑定子表复选框事件
+            var subChecks = rowArea.querySelectorAll('.np-sub-start');
+            for (var sci = 0; sci < subChecks.length; sci++) {
+                subChecks[sci].addEventListener('change', function(e) {
+                    var row = parseInt(e.target.dataset.row);
+                    npSubStartConfig[row] = e.target.checked;
+                    if (e.target.checked) {
+                        npRowConfig[row] = 'data';
+                        var radioEl = rowArea.querySelector('input[name="npRowType_' + row + '"][value="data"]');
+                        if (radioEl) radioEl.checked = true;
+                    }
+                    npCalculate();
+                });
+            }
+
+            var colHtml = '<div style="display:flex;align-items:center;margin-bottom:3px;">' +
+                '<span style="color:#333;">合计验证（勾选要验证的列）：</span>' +
+                '<a href="#" class="np-sum-select-all" style="margin-left:10px;color:#1a7f37;font-size:11px;">全选</a>' +
+                '<a href="#" class="np-sum-deselect-all" style="margin-left:6px;color:#1a7f37;font-size:11px;">全不选</a>' +
+                '</div>';
+            colHtml += '<div class="np-sum-cols" style="max-height:150px;overflow-y:auto;">';
+            // 恢复合计列勾选：优先沿用当前 DOM 中已有的勾选（用户刚改过、尚未保存的最新状态），
+            // 其次用上次会话保存的状态，最后默认全选
+            var existingSumChecks = document.querySelectorAll('.np-sum-col');
+            var savedSumCols = null;
+            if (existingSumChecks.length > 0) {
+                savedSumCols = [];
+                for (var esc = 0; esc < existingSumChecks.length; esc++) {
+                    if (existingSumChecks[esc].checked) {
+                        savedSumCols.push(parseInt(existingSumChecks[esc].dataset.col));
+                    }
+                }
+            } else if (npSavedState) {
+                savedSumCols = npSavedState.sumCols;
+            }
+            for (var c = 0; c < parsed.headers.length; c++) {
+                var header = parsed.headers[c];
+                var label = header || ('列' + (c + 1));
+                var isSumChecked = true;
+                if (savedSumCols) {
+                    isSumChecked = false;
+                    for (var sc = 0; sc < savedSumCols.length; sc++) {
+                        if (savedSumCols[sc] === c) { isSumChecked = true; break; }
+                    }
+                }
+                colHtml += '<label style="display:block;margin-bottom:2px;"><input type="checkbox" class="np-sum-col" data-col="' + c + '"' + (isSumChecked ? ' checked' : '') + '> ' + label + '</label>';
+            }
+            colHtml += '</div>';
+            colArea.innerHTML = colHtml;
+
+            // 绑定全选/全不选
+            var selectAllBtn = colArea.querySelector('.np-sum-select-all');
+            var deselectAllBtn = colArea.querySelector('.np-sum-deselect-all');
+            var sumCheckboxes = colArea.querySelectorAll('.np-sum-col');
+            for (var si = 0; si < sumCheckboxes.length; si++) {
+                sumCheckboxes[si].addEventListener('change', npCalculate);
+            }
+            if (selectAllBtn) {
+                selectAllBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    for (var s2 = 0; s2 < sumCheckboxes.length; s2++) {
+                        sumCheckboxes[s2].checked = true;
+                    }
+                    npCalculate();
+                });
+            }
+            if (deselectAllBtn) {
+                deselectAllBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    for (var s3 = 0; s3 < sumCheckboxes.length; s3++) {
+                        sumCheckboxes[s3].checked = false;
+                    }
+                    npCalculate();
+                });
+            }
+
+            // -- 比例验证配置放在最后，避免与合计验证混在一起 --
+            // (pctHtml 已在前面定义；此处标记分隔已完成)
+            var pctHtml = '<div style="color:#333;margin-bottom:3px;font-weight:bold;">比例验证（逐行核验：每行比例 = 源数值 / 分母 × 100%）</div>';
+            // 默认组（紧凑一行，与新增组风格一致）
+            pctHtml += '<div style="font-size:11px;color:#555;margin-bottom:2px;">比例列: ';
+            pctHtml += '<select id="npPctCol" style="font-size:11px;padding:1px 2px;border:1px solid #ccc;border-radius:2px;margin-right:6px;"><option value="">-- 选择比例列 --</option>';
+            for (var c2 = 0; c2 < parsed.headers.length; c2++) {
+                var h2 = parsed.headers[c2] || ('列' + (c2 + 1));
+                pctHtml += '<option value="' + c2 + '">' + h2 + '</option>';
+            }
+            pctHtml += '</select> | 源数值列: ';
+            pctHtml += '<select id="npPctSrcCol" style="font-size:11px;padding:1px 2px;border:1px solid #ccc;border-radius:2px;margin-right:6px;"><option value="">-- 选择数值列 --</option>';
+            for (var c3 = 0; c3 < parsed.headers.length; c3++) {
+                var h3 = parsed.headers[c3] || ('列' + (c3 + 1));
+                pctHtml += '<option value="' + c3 + '">' + h3 + '</option>';
+            }
+            pctHtml += '</select> | 分母: ';
+            pctHtml += '<select id="npPctDenom" style="font-size:11px;padding:1px 2px;border:1px solid #ccc;border-radius:2px;margin-right:4px;"><option value="sum">源列的合计数</option><option value="last">源列的最后一个数</option><option value="custom">自定义数值</option></select>';
+            pctHtml += '<input type="number" id="npPctDenomVal" placeholder="输入数值" style="width:80px;font-size:11px;padding:1px 2px;border:1px solid #ccc;border-radius:2px;display:none;"></div>';
+            // 新增列验证按钮：创建新验证组（独立计算、独立结果表）
+            pctHtml += '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #ccc;">';
+            pctHtml += '<button id="npBtnNewPct" style="font-size:12px;padding:3px 10px;background:#1a7f37;color:#fff;border:none;border-radius:3px;cursor:pointer;">新增列验证</button>';
+            pctHtml += '<span style="font-size:11px;color:#777;margin-left:6px;">可同时验证多个比例列（每组独立计算与输出）</span>';
+            pctHtml += '</div>';
+            pctHtml += '<div id="npPctGroups" style="margin-top:6px;"></div>';
+            pctConfig.innerHTML = pctHtml;
+            // 恢复已保存的比例验证设置
+            if (npSavedState) {
+                var pctColSel = document.getElementById('npPctCol');
+                if (pctColSel && npSavedState.pctCol) pctColSel.value = npSavedState.pctCol;
+                var pctSrcSel = document.getElementById('npPctSrcCol');
+                if (pctSrcSel && npSavedState.pctSrcCol) pctSrcSel.value = npSavedState.pctSrcCol;
+                var denomSel = document.getElementById('npPctDenom');
+                if (denomSel && npSavedState.pctDenom) denomSel.value = npSavedState.pctDenom;
+                var denomValInput = document.getElementById('npPctDenomVal');
+                if (denomValInput && npSavedState.pctDenomVal) denomValInput.value = npSavedState.pctDenomVal;
+                if (denomSel && denomValInput) {
+                    denomValInput.style.display = (denomSel.value === 'custom') ? 'inline-block' : 'none';
+                }
+                // 恢复默认组勾选状态（刷新后保留选中列）
+                if (npSavedState && npSavedState.pctCol !== undefined && npSavedState.pctCol !== '') {
+                    var defaultCheck = document.querySelector('.np-pct-col-check[data-col="' + npSavedState.pctCol + '"]');
+                    if (defaultCheck) defaultCheck.checked = true;
+                }
+            }
+            // 新增列验证：创建独立验证组（每组独立计算、独立输出表格）
+            var btnNewPct = document.getElementById('npBtnNewPct');
+            if (btnNewPct) {
+                btnNewPct.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    var groupId = 'pctg_' + Date.now();
+                    var grpDiv = document.createElement('div');
+                    grpDiv.style.cssText = 'margin-top:8px;padding-top:6px;border-top:1px dashed #aaa;background:#f9f9f9;border-radius:3px;padding:6px;';
+                    grpDiv.innerHTML = '<div style="font-size:12px;font-weight:bold;color:#2b579a;margin-bottom:4px;">新增列验证组 · ' + groupId + '</div>' +
+                        '<div style="font-size:11px;color:#555;">比例列: <select id="npPctCol_' + groupId + '"><option value="">-- 选择 --</option></select> ' +
+                        '源数值列: <select id="npPctSrcCol_' + groupId + '"><option value="">-- 选择 --</option></select> ' +
+                        '分母: <select id="npPctDenom_' + groupId + '"><option value="sum">源列合计</option><option value="last">源列最后</option><option value="custom">自定义</option></select> ' +
+                        '<input type="number" id="npPctDenomVal_' + groupId + '" placeholder="值" style="width:70px;font-size:11px;padding:1px 2px;border:1px solid #ccc;border-radius:2px;display:none;margin-left:2px;"></div>';
+                    var grpArea = document.getElementById('npPctGroups');
+                    if (grpArea) grpArea.appendChild(grpDiv); else pctConfig.appendChild(grpDiv);
+                    // 填充选项
+                    var cols = parsed ? parsed.headers : [];
+                    var colOpt = document.getElementById('npPctCol_' + groupId);
+                    var srcOpt = document.getElementById('npPctSrcCol_' + groupId);
+                    if (colOpt && cols) {
+                        for (var cg = 0; cg < cols.length; cg++) colOpt.innerHTML += '<option value="' + cg + '">' + (cols[cg] || ('列'+(cg+1))) + '</option>';
+                    }
+                    if (srcOpt && cols) {
+                        for (var sg = 0; sg < cols.length; sg++) srcOpt.innerHTML += '<option value="' + sg + '">' + (cols[sg] || ('列'+(sg+1))) + '</option>';
+                    }
+                    // 绑定计算触发
+                    var grpInputs = grpDiv.querySelectorAll('select');
+                    for (var gi = 0; gi < grpInputs.length; gi++) {
+                        grpInputs[gi].addEventListener('change', function() { npCalculate(); });
+                    }
+                    document.getElementById('npAutoMarkMsg').textContent = '已新增列验证组（' + groupId + '）';
+                });
+            }
+        },
+
+        parseInput: function(text) {
+            return npImportedData || parseTable(text);
+        },
+
+        calculate: function(parsed) {
+            if (!parsed || !parsed.headers) {
+                return { headers: [], results: [], summary: null, error: '无法解析表格，请粘贴制表符分隔的表格数据' };
+            }
+
+            var rowTypes = npRowConfig.slice();
+            for (var r = 0; r < parsed.dataRows.length; r++) {
+                if (!rowTypes[r]) rowTypes[r] = 'data';
+            }
+
+            var sumCols = [];
+            var sumChecks = document.querySelectorAll('.np-sum-col:checked');
+            for (var i = 0; i < sumChecks.length; i++) sumCols.push(parseInt(sumChecks[i].dataset.col));
+
+            var pctColEl = document.getElementById('npPctCol');
+            var pctSrcColEl = document.getElementById('npPctSrcCol');
+            var denomEl = document.getElementById('npPctDenom');
+            var denomValEl = document.getElementById('npPctDenomVal');
+
+            var pctCol = pctColEl ? (pctColEl.value !== '' ? parseInt(pctColEl.value) : -1) : -1;
+            var pctSrcCol = pctSrcColEl ? (pctSrcColEl.value !== '' ? parseInt(pctSrcColEl.value) : -1) : -1;
+            var denomType = denomEl ? denomEl.value : 'sum';
+            var denomCustom = denomValEl ? parseFloat(denomValEl.value) : NaN;
+
+            var results = [];
+            var passCount = 0;
+            var failCount = 0;
+
+            var hasTotalEl3 = document.getElementById('npOptHasTotal');
+            var hasTotal3 = hasTotalEl3 ? hasTotalEl3.checked : true;
+
+            // ===== 子表结构预计算 =====
+            var subStartRows = [];
+            for (var rs = 0; rs < parsed.dataRows.length; rs++) {
+                if (npSubStartConfig && npSubStartConfig[rs]) subStartRows.push(rs);
+            }
+            var hasSubs = subStartRows.length > 0;
+
+            var subRanges = [];       // {start, end, label, totalRowIdx}
+            var globalTotalRow = -1;  // 全局总计行索引（子表模式下整表最后一行）
+
+            if (hasSubs) {
+                var lastIdx = parsed.dataRows.length - 1;
+                // 勾选"最后一行是合计行"、最后一行不是标记行也不是无关行 → 作为全局总计行，不参与任何子表
+                if (hasTotal3 && subStartRows[subStartRows.length - 1] < lastIdx && rowTypes[lastIdx] !== 'ignore') {
+                    globalTotalRow = lastIdx;
+                    lastIdx = lastIdx - 1;
+                }
+                // 子表1：第一个标记行之前的行
+                if (subStartRows[0] > 0) {
+                    subRanges.push({ start: 0, end: subStartRows[0] - 1, label: '子表1' });
+                }
+                // 子表2..N：从标记行起到下一个标记行前一行
+                for (var si = 0; si < subStartRows.length; si++) {
+                    var s = subStartRows[si];
+                    var e = (si + 1 < subStartRows.length) ? subStartRows[si + 1] - 1 : lastIdx;
+                    if (s > e) continue;
+                    var label = '子表' + (si + 2);
+                    if (parsed.textRows && parsed.textRows[s] && parsed.textRows[s][0]) {
+                        var t = String(parsed.textRows[s][0]).trim();
+                        if (t) label += '·' + t;
+                    }
+                    subRanges.push({ start: s, end: e, label: label });
+                }
+                // 预计算每个子表的合计行：范围内（跳过标记行）最后一行有数字的行
+                for (var sr = 0; sr < subRanges.length; sr++) {
+                    var rg = subRanges[sr];
+                    var totalIdx = -1;
+                    for (var rr = rg.end; rr >= rg.start; rr--) {
+                        if (npSubStartConfig && npSubStartConfig[rr]) continue;
+                        if (rowTypes[rr] === 'ignore') continue;   // 无关行不可能是合计行
+                        var hasAny = false;
+                        for (var cc = 0; cc < parsed.headers.length; cc++) {
+                            var vv = parsed.dataRows[rr][cc];
+                            if (typeof vv === 'number' && !isNaN(vv)) { hasAny = true; break; }
+                        }
+                        if (hasAny) { totalIdx = rr; break; }
+                    }
+                    rg.totalRowIdx = totalIdx;
+                }
+            }
+
+            for (var c = 0; c < parsed.headers.length; c++) {
+                if (sumCols.indexOf(c) < 0) continue;
+                var header = parsed.headers[c];
+
+                if (hasSubs) {
+                    // ===== 子表模式：每个子表独立验证 =====
+                    var dataTotalAll = 0;  // 中间变量：所有明细行累计（不含子表合计行/总计行；子表标记行的数值计入）
+                    var subTotalSum = 0;   // 各子表合计值之和
+
+                    for (var sr2 = 0; sr2 < subRanges.length; sr2++) {
+                        var rg2 = subRanges[sr2];
+                        var computedSub = 0;
+                        var formulaParts = [];
+                        var hasComputed = false;
+
+                        for (var rr2 = rg2.start; rr2 <= rg2.end; rr2++) {
+                            // 子表标记行（打钩行）是该子表的第一行：其数值计入子表求和，不作为合计行
+                            if (rr2 === rg2.totalRowIdx) continue;
+                            var rowType = rowTypes[rr2];
+                            if (rowType === 'ignore') continue;
+                            var coeff = rowType === 'subtract' ? -1 : 1;
+                            var val = parsed.dataRows[rr2][c];
+                            if (typeof val !== 'number' || isNaN(val)) continue;
+                            computedSub += val * coeff;
+                            dataTotalAll += val * coeff;
+                            hasComputed = true;
+                            var numStr = formatNumber(val);
+                            if (formulaParts.length === 0) {
+                                formulaParts.push(coeff === -1 ? '-' + numStr : numStr);
+                            } else {
+                                formulaParts.push(coeff === -1 ? '-' + numStr : '+' + numStr);
+                            }
+                        }
+
+                        var actualSub = null;
+                        var actualSubLabel = '';
+                        if (rg2.totalRowIdx >= 0) {
+                            var av = parsed.dataRows[rg2.totalRowIdx][c];
+                            if (typeof av === 'number' && !isNaN(av)) {
+                                actualSub = av;
+                                subTotalSum += av;
+                            }
+                            if (parsed.textRows && parsed.textRows[rg2.totalRowIdx] && parsed.textRows[rg2.totalRowIdx][0]) {
+                                actualSubLabel = String(parsed.textRows[rg2.totalRowIdx][0]).trim();
+                            }
+                        }
+
+                        if (rg2.totalRowIdx < 0) {
+                            // 该子表无任何数字：跳过
+                            continue;
+                        }
+                        var diffSub = computedSub - actualSub;
+                        var tolSub = Math.max(1, Math.abs(actualSub) * 0.001);
+                        var passSub = actualSub !== null && Math.abs(diffSub) < tolSub;
+                        results.push({
+                            type: 'sub',
+                            subLabel: rg2.label,
+                            header: header,
+                            rowLabel: actualSubLabel,
+                            computed: computedSub,
+                            actual: actualSub,
+                            diff: diffSub,
+                            pass: passSub,
+                            formula: '=' + formulaParts.join(''),
+                            colIdx: c,
+                            rowIdx: rg2.totalRowIdx
+                        });
+                        if (passSub) passCount++; else failCount++;
+                    }
+
+                    // ===== 全局总计双验证 =====
+                    if (globalTotalRow >= 0) {
+                        var actualTotal = parsed.dataRows[globalTotalRow][c];
+                        if (typeof actualTotal !== 'number' || isNaN(actualTotal)) actualTotal = null;
+
+                        var totalLabel = '';
+                        if (parsed.textRows && parsed.textRows[globalTotalRow] && parsed.textRows[globalTotalRow][0]) {
+                            totalLabel = String(parsed.textRows[globalTotalRow][0]).trim();
+                        }
+                        if (!totalLabel) totalLabel = '总计';
+
+                        if (actualTotal !== null) {
+                            // 方式A：各子表合计值之和
+                            var diffA = subTotalSum - actualTotal;
+                            var tolA = Math.max(1, Math.abs(actualTotal) * 0.001);
+                            var passA = Math.abs(diffA) < tolA;
+                            // 方式B：明细直接累计
+                            var diffB = dataTotalAll - actualTotal;
+                            var tolB = Math.max(1, Math.abs(actualTotal) * 0.001);
+                            var passB = Math.abs(diffB) < tolB;
+
+                            results.push({
+                                type: 'global',
+                                header: header,
+                                rowLabel: totalLabel,
+                                actual: actualTotal,
+                                subTotalSum: subTotalSum,
+                                dataTotalAll: dataTotalAll,
+                                diffA: diffA,
+                                passA: passA,
+                                diffB: diffB,
+                                passB: passB,
+                                colIdx: c,
+                                rowIdx: globalTotalRow
+                            });
+                            if (passA) passCount++; else failCount++;
+                            if (passB) passCount++; else failCount++;
+                        }
+                    }
+                } else {
+                    // ===== 原旧逻辑（无子表标记时保持完全一致） =====
+                    var computedVal = 0;
+                    var formulaParts2 = [];
+                    var actualVal = null;
+                    var actualRowLabel = '';
+
+                    for (var r = 0; r < parsed.dataRows.length; r++) {
+                        var rowType = rowTypes[r];
+                        var coeff = rowType === 'data' ? 1 : rowType === 'subtract' ? -1 : 0;
+
+                        var val = parsed.dataRows[r][c];
+                        if (typeof val !== 'number' || isNaN(val)) continue;
+
+                        if (hasTotal3 && r === parsed.dataRows.length - 1 && rowType !== 'ignore') {
+                            actualVal = val;
+                            // 优先使用textRows获取原始文本
+                            if (parsed.textRows && parsed.textRows[r] && parsed.textRows[r][0]) {
+                                actualRowLabel = String(parsed.textRows[r][0]).trim();
+                            } else {
+                                var firstCell = parsed.dataRows[r][0];
+                                actualRowLabel = firstCell !== null && firstCell !== undefined ? String(firstCell).trim() : ('第' + (r + 1) + '行');
+                            }
+                            break;
+                        }
+
+                        computedVal += val * coeff;
+                        var numStr = formatNumber(val);
+                        if (formulaParts2.length === 0) {
+                            formulaParts2.push(coeff === -1 ? '-' + numStr : numStr);
+                        } else if (coeff === 1) {
+                            formulaParts2.push('+' + numStr);
+                        } else if (coeff === -1) {
+                            formulaParts2.push('-' + numStr);
+                        }
+                    }
+
+                    if (!hasTotal3) {
+                        var diff = 0;
+                        var pass = true;
+                        results.push({
+                            type: 'sum',
+                            header: header,
+                            rowLabel: '合计',
+                            rowType: 'sum',
+                            computed: computedVal,
+                            actual: null,
+                            diff: 0,
+                            pass: true,
+                            formula: '=' + formulaParts2.join(''),
+                            colIdx: c,
+                            rowIdx: -1
+                        });
+                        passCount++;
+                    } else if (hasTotal3 && rowTypes[parsed.dataRows.length - 1] === 'ignore') {
+                        // 最后一行被标记为无关，不作为合计行
+                        results.push({
+                            type: 'sum',
+                            header: header,
+                            rowLabel: '合计（最后一行已标记为无关，未验证）',
+                            rowType: 'sum',
+                            computed: computedVal,
+                            actual: null,
+                            diff: 0,
+                            pass: true,
+                            formula: '=' + formulaParts2.join(''),
+                            colIdx: c,
+                            rowIdx: parsed.dataRows.length - 1
+                        });
+                        passCount++;
+                    } else if (actualVal !== null && typeof actualVal === 'number') {
+                        var diff2 = computedVal - actualVal;
+                        var tolerance = Math.max(1, Math.abs(actualVal) * 0.001);
+                        var pass2 = Math.abs(diff2) < tolerance;
+
+                        results.push({
+                            type: 'sum',
+                            header: header,
+                            rowLabel: actualRowLabel,
+                            rowType: 'total',
+                            computed: computedVal,
+                            actual: actualVal,
+                            diff: diff2,
+                            pass: pass2,
+                            formula: '=' + formulaParts2.join(''),
+                            colIdx: c,
+                            rowIdx: parsed.dataRows.length - 1
+                        });
+                        if (pass2) passCount++; else failCount++;
+                    }
+                }
+            }
+
+            // ===== 比例验证：收集所有活动组（默认 + 新增组）独立计算输出 =====
+            var pctGroups = [];
+            // 默认组
+            var defColEl = document.getElementById('npPctCol');
+            var defSrcEl = document.getElementById('npPctSrcCol');
+            var defDenomEl = document.getElementById('npPctDenom');
+            var defValEl = document.getElementById('npPctDenomVal');
+            if (defColEl && defColEl.value !== '' && defSrcEl && defSrcEl.value !== '') {
+                pctGroups.push({
+                    label: '比例验证（默认组）',
+                    col: parseInt(defColEl.value),
+                    src: parseInt(defSrcEl.value),
+                    denomType: defDenomEl ? defDenomEl.value : 'sum',
+                    denomCustom: defValEl ? parseFloat(defValEl.value) : NaN,
+                    denomDesc: (defDenomEl ? defDenomEl.value : 'sum') === 'sum' ? '源列合计' : ((defDenomEl ? defDenomEl.value : 'sum') === 'last' ? '源列末值' : '自定义 ' + (defValEl ? formatNumber(parseFloat(defValEl.value) || 0) : ''))
+                });
+            }
+            // 新增组（从容器中扫描所有有效配置）
+            var grpContainer = document.getElementById('npPctGroups');
+            if (grpContainer) {
+                var grpSelects = grpContainer.querySelectorAll('select');
+                // 每组有3个select，按顺序读取
+                for (var grpScan = 0; grpScan < grpSelects.length; grpScan += 3) {
+                    var grpColEl = grpSelects[grpScan];
+                    var grpSrcEl = grpScan + 1 < grpSelects.length ? grpSelects[grpScan + 1] : null;
+                    var grpDenomEl = grpScan + 2 < grpSelects.length ? grpSelects[grpScan + 2] : null;
+                    var grpValEl = grpColEl ? grpColEl.parentElement ? grpColEl.parentElement.querySelector('input[type="number"]') : null : null;
+                    // 使用组内标题作为标签（从组容器的标题文本提取）
+                    var grpTitleEl = grpColEl ? grpColEl.closest('div[style*="margin-top:8px"]') ? grpColEl.closest('div').querySelector('div[style*="font-weight:bold"]') : null : null;
+                    var grpLabelText = '新增列验证组';
+                    if (grpTitleEl && grpTitleEl.textContent) {
+                        grpLabelText = grpTitleEl.textContent.trim();
+                    }
+                    if (grpColEl && grpColEl.value !== '' && grpSrcEl && grpSrcEl.value !== '') {
+                        pctGroups.push({
+                            label: grpLabelText,
+                            col: parseInt(grpColEl.value),
+                            src: parseInt(grpSrcEl.value),
+                            denomType: grpDenomEl ? grpDenomEl.value : 'sum',
+                            denomCustom: grpValEl ? parseFloat(grpValEl.value) : NaN,
+                            denomDesc: (grpDenomEl ? grpDenomEl.value : 'sum') === 'sum' ? '源列合计' : ((grpDenomEl ? grpDenomEl.value : 'sum') === 'last' ? '源列末值' : '自定义 ' + (grpValEl ? formatNumber(parseFloat(grpValEl.value) || 0) : ''))
+                        });
+                    }
+                }
+            }
+
+            // ===== 每组独立计算比例验证 =====
+            for (var pg = 0; pg < pctGroups.length; pg++) {
+                var grp = pctGroups[pg];
+                var pctCol = grp.col;
+                var pctSrcCol = grp.src;
+                var denomType = grp.denomType;
+                var denomCustom = grp.denomCustom;
+
+                var denominator = 0;
+                if (denomType === 'sum') {
+                    var srcSum = 0;
+                    for (var sr = 0; sr < parsed.dataRows.length; sr++) {
+                        var srType = rowTypes[sr];
+                        var coeff2 = srType === 'data' ? 1 : srType === 'subtract' ? -1 : 0;
+                        var sv = parsed.dataRows[sr][pctSrcCol];
+                        if (typeof sv === 'number' && !isNaN(sv)) srcSum += sv * coeff2;
+                    }
+                    denominator = srcSum;
+                } else if (denomType === 'last') {
+                    if (parsed.dataRows.length > 0) {
+                        var lastVal = parsed.dataRows[parsed.dataRows.length - 1][pctSrcCol];
+                        if (typeof lastVal === 'number' && !isNaN(lastVal)) denominator = lastVal;
+                    }
+                } else if (denomType === 'custom') {
+                    denominator = denomCustom;
+                }
+
+                var denomDesc = grp.denomDesc || '';
+                if (pctCol >= 0 && pctSrcCol >= 0 && pctCol !== pctSrcCol) {
+                    if (!denominator || denominator === 0 || isNaN(denominator)) {
+                        results.push({
+                            type: 'pct-config',
+                            groupLabel: grp.label,
+                            pass: false,
+                            note: '分母无效，请选择有效数值或输入非零数值（组：' + grp.label + '）'
+                        });
+                        failCount++;
+                    } else {
+                        var pctResults = [];
+                        for (var pr = 0; pr < parsed.dataRows.length; pr++) {
+                            var prType = rowTypes[pr];
+                            if (prType === 'ignore') continue;
+                            var rowLabel2 = '';
+                            if (parsed.textRows && parsed.textRows[pr] && parsed.textRows[pr][0]) {
+                                rowLabel2 = String(parsed.textRows[pr][0]).trim();
+                            } else if (parsed.dataRows[pr][0] !== null && parsed.dataRows[pr][0] !== undefined) {
+                                rowLabel2 = String(parsed.dataRows[pr][0]);
+                            } else {
+                                rowLabel2 = '第' + (pr + 1) + '行';
+                            }
+                            var srcVal = parsed.dataRows[pr][pctSrcCol];
+                            var pctVal = parsed.dataRows[pr][pctCol];
+
+                            if (typeof srcVal !== 'number' || isNaN(srcVal)) {
+                                pctResults.push({ row: rowLabel2, computed: null, expected: null, diff: null, pass: null, note: '源数值无效' });
+                                continue;
+                            }
+                            if (typeof pctVal !== 'number' || isNaN(pctVal)) {
+                                pctResults.push({ row: rowLabel2, computed: null, expected: null, diff: null, pass: null, note: '比例值无效' });
+                                continue;
+                            }
+
+                            var computedPct = (srcVal / denominator) * 100;
+                            var diffPct = computedPct - pctVal;
+                            var pctTolerance = 0.1;
+                            var pctPass = Math.abs(diffPct) < pctTolerance;
+                            pctResults.push({
+                                row: rowLabel2,
+                                sourceValue: srcVal,
+                                denominator: denominator,
+                                computed: computedPct,
+                                expected: pctVal,
+                                diff: diffPct,
+                                pass: pctPass
+                            });
+                            if (pctPass) passCount++; else failCount++;
+                        }
+
+                        var sameCount = 0, diffCount2 = 0, invalidCount2 = 0;
+                        for (var cnt = 0; cnt < pctResults.length; cnt++) {
+                            var cntRow = pctResults[cnt];
+                            if (cntRow.note === '源数值无效') invalidCount2++;
+                            else if (cntRow.pass) sameCount++;
+                            else diffCount2++;
+                        }
+                        results.push({
+                            type: 'pct',
+                            groupLabel: grp.label,
+                            pctHeader: parsed.headers[pctCol],
+                            srcHeader: parsed.headers[pctSrcCol],
+                            denomDesc: denomDesc,
+                            denomValue: denominator,
+                            rows: pctResults,
+                            sameCount: sameCount,
+                            diffCount: diffCount2,
+                            invalidCount: invalidCount2
+                        });
+                    }
+                }
+            }
+
+            return {
+                headers: parsed.headers,
+                results: results,
+                summary: { pass: passCount, fail: failCount, total: results.length },
+                // 供"检验结果汇总表"使用：原始数据网格（未验证列的原始值）
+                dataRows: parsed.dataRows
+            };
+        },
+
+        render: function(result) {
+            if (result.error) return '<div class="np-error">' + result.error + '</div>';
+            if (!result.results || result.results.length === 0) {
+                return '<div class="np-empty">请勾选合计列，并/或设置比例验证</div>';
+            }
+
+            var html = '';
+            for (var i = 0; i < result.results.length; i++) {
+                var r = result.results[i];
+                if (r.type === 'sum' || r.type === 'sub') {
+                    var labelPrefix = r.type === 'sub' ? ('[' + r.subLabel + '] ') : '';
+                    html += '<div class="np-verify-row">';
+                    html += '<span class="np-verify-label">' + labelPrefix + r.header + (r.rowLabel !== '合计' ? ' · ' + r.rowLabel : '') + '</span>';
+                    html += '<span class="np-verify-detail">';
+                    if (r.actual !== null && r.actual !== undefined) {
+                        html += '计算: <span class="np-verify-value">' + formatNumber(r.computed) + '</span> vs <span class="np-verify-value">' + formatNumber(r.actual) + '</span>';
+                        html += ' 差: <span class="np-verify-diff ' + (r.pass ? 'np-verify-pass' : 'np-verify-fail') + '">' +
+                            (r.diff > 0 ? '+' : '') + formatNumber(r.diff) + '</span>';
+                    } else {
+                        html += '计算合计: <span class="np-verify-value">' + formatNumber(r.computed) + '</span>';
+                    }
+                    if (r.formula) {
+                        html += ' <span class="np-verify-formula">(' + r.formula + ')</span>';
+                    }
+                    if (r.actual !== null && r.actual !== undefined) {
+                        html += ' <span class="np-badge ' + (r.pass ? 'np-badge-ok' : 'np-badge-fail') + '">' +
+                            (r.pass ? '通过' : '不通过') + '</span>';
+                    }
+                    html += '</span></div>';
+                } else if (r.type === 'global') {
+                    html += '<div style="margin-top:6px;border-top:1px dashed #bbb;padding-top:4px;">';
+                    html += '<div style="color:#1a5276;font-weight:600;font-size:12px;margin-bottom:2px;">' +
+                        r.header + ' · ' + r.rowLabel + '（全局总计双验证）</div>';
+                    html += '<div class="np-verify-row">';
+                    html += '<span class="np-verify-label">方式A · 各子表合计之和</span>';
+                    html += '<span class="np-verify-detail">计算: <span class="np-verify-value">' + formatNumber(r.subTotalSum) +
+                        '</span> vs <span class="np-verify-value">' + formatNumber(r.actual) + '</span>';
+                    html += ' 差: <span class="np-verify-diff ' + (r.passA ? 'np-verify-pass' : 'np-verify-fail') + '">' +
+                        (r.diffA > 0 ? '+' : '') + formatNumber(r.diffA) + '</span>';
+                    html += ' <span class="np-badge ' + (r.passA ? 'np-badge-ok' : 'np-badge-fail') + '">' +
+                        (r.passA ? '通过' : '不通过') + '</span></span></div>';
+                    html += '<div class="np-verify-row">';
+                    html += '<span class="np-verify-label">方式B · 明细直接累计</span>';
+                    html += '<span class="np-verify-detail">计算: <span class="np-verify-value">' + formatNumber(r.dataTotalAll) +
+                        '</span> vs <span class="np-verify-value">' + formatNumber(r.actual) + '</span>';
+                    html += ' 差: <span class="np-verify-diff ' + (r.passB ? 'np-verify-pass' : 'np-verify-fail') + '">' +
+                        (r.diffB > 0 ? '+' : '') + formatNumber(r.diffB) + '</span>';
+                    html += ' <span class="np-badge ' + (r.passB ? 'np-badge-ok' : 'np-badge-fail') + '">' +
+                        (r.passB ? '通过' : '不通过') + '</span></span></div>';
+                    html += '</div>';
+                } else if (r.type === 'pct-config') {
+                    html += '<div class="np-verify-row"><span class="np-verify-fail">⚠ ' + r.note + '</span></div>';
+                }
+            }
+
+            if (result.summary) {
+                var s = result.summary;
+                html += '<div class="np-summary">';
+                html += '验证 <b>' + s.total + '</b> 项：' +
+                    '<span class="np-verify-pass">通过 ' + s.pass + '</span>，' +
+                    '<span class="' + (s.fail > 0 ? 'np-verify-fail' : 'np-verify-pass') + '">不通过 ' + s.fail + '</span>';
+                html += '</div>';
+            }
+
+            // ========== 检验结果汇总表（相同表头；仅列出有验证结果的合计/总计行，明细行与无关行不重复） ==========
+            if (result.dataRows && result.dataRows.length > 0 && result.headers && result.headers.length > 0) {
+                // 建立 行_列 → 验证结果 的索引；无关行不计入合计、也没有验证条目，自然不会出现在汇总表
+                var verdictMap = {};
+                var rowMeta = {};
+                for (var vi = 0; vi < result.results.length; vi++) {
+                    var ve = result.results[vi];
+                    if (ve.rowIdx === undefined || ve.rowIdx < 0 ||
+                        ve.colIdx === undefined || ve.colIdx < 0) continue;
+                    // 无实际合计值的条目（如"最后一行无关，未验证"）不列入汇总
+                    if ((ve.type === 'sum' || ve.type === 'sub') &&
+                        (ve.actual === null || ve.actual === undefined)) continue;
+                    verdictMap[ve.rowIdx + '_' + ve.colIdx] = ve;
+                    if (!rowMeta[ve.rowIdx]) {
+                        rowMeta[ve.rowIdx] = (ve.type === 'sub')
+                            ? (ve.subLabel || ('第' + (ve.rowIdx + 1) + '行'))
+                            : (ve.rowLabel || ('第' + (ve.rowIdx + 1) + '行'));
+                    }
+                }
+                var rowIdxs = [];
+                for (var rid in rowMeta) rowIdxs.push(parseInt(rid));
+                rowIdxs.sort(function(a, b) { return a - b; });
+
+                if (rowIdxs.length > 0) {
+                    function fmtCellVal(v) {
+                        if (v !== null && v !== undefined && typeof v === 'number' && !isNaN(v)) return formatNumber(v);
+                        return '<span style="color:#bbb;">—</span>';
+                    }
+                    function verdictHtml(ve) {
+                        if (ve.type === 'sum' || ve.type === 'sub') {
+                            var okS = ve.pass;
+                            var txtS = (okS ? '✓ ' : '✗ ') + formatNumber(ve.computed) + ' = ' + formatNumber(ve.actual);
+                            if (!okS && ve.diff !== undefined) {
+                                txtS += ' <span style="font-size:10px;opacity:0.75;">(差 ' +
+                                    (ve.diff > 0 ? '+' : '') + formatNumber(ve.diff) + ')</span>';
+                            }
+                            return '<span class="' + (okS ? 'np-verify-pass' : 'np-verify-fail') + '">' + txtS + '</span>';
+                        }
+                        if (ve.type === 'global') {
+                            return '<span class="' + (ve.passA ? 'np-verify-pass' : 'np-verify-fail') + '">A' +
+                                (ve.passA ? '✓' : '✗') + '</span> ' +
+                                '<span class="' + (ve.passB ? 'np-verify-pass' : 'np-verify-fail') + '">B' +
+                                (ve.passB ? '✓' : '✗') + '</span> ' +
+                                '<span>' + formatNumber(ve.dataTotalAll) + ' = ' + formatNumber(ve.actual) + '</span>';
+                        }
+                        return '';
+                    }
+
+                    var mHtml = '<div style="margin-top:10px;border-top:2px solid #2b579a;padding-top:8px;">';
+                    mHtml += '<div style="font-size:12px;font-weight:bold;color:#2b579a;margin-bottom:6px;">检验结果汇总（合计/总计行：计算 vs 表中，✓=通过 ✗=不通过；无关行不计入）</div>';
+                    mHtml += '<div style="max-height:320px;overflow-y:auto;border:1px solid #d0d7de;border-radius:3px;">';
+                    mHtml += '<table class="np-table" style="margin:0;">';
+                    mHtml += '<thead><tr>';
+                    for (var mc = 0; mc < result.headers.length; mc++) {
+                        mHtml += '<th>' + (result.headers[mc] || ('列' + (mc + 1))) + '</th>';
+                    }
+                    mHtml += '</tr></thead><tbody>';
+
+                    for (var mi = 0; mi < rowIdxs.length; mi++) {
+                        var mr = rowIdxs[mi];
+                        mHtml += '<tr>';
+                        for (var mc2 = 0; mc2 < result.headers.length; mc2++) {
+                            var entry = verdictMap[mr + '_' + mc2];
+                            var rawVal = result.dataRows[mr] ? result.dataRows[mr][mc2] : null;
+                            if (entry) {
+                                mHtml += '<td>' + verdictHtml(entry) + '</td>';
+                            } else if (mc2 === 0) {
+                                // 第一列：用合计/总计行的标识（子表用子表名）
+                                mHtml += '<td><span style="color:#1a5276;font-weight:600;">' + rowMeta[mr] + '</span></td>';
+                            } else {
+                                mHtml += '<td class="' + (typeof rawVal === 'number' && !isNaN(rawVal) ? 'np-num' : '') + '">' +
+                                    fmtCellVal(rawVal) + '</td>';
+                            }
+                        }
+                        mHtml += '</tr>';
+                    }
+                    mHtml += '</tbody></table></div></div>';
+                    html += mHtml;
+                }
+            }
+
+            // ========== 比例验证结果放在最后（与合计验证分开） ==========
+            for (var pi = 0; pi < result.results.length; pi++) {
+                var pr = result.results[pi];
+                if (pr.type === 'pct') {
+                    html += '<div style="margin-top:10px;border-top:2px solid #2b579a;padding-top:6px;">';
+                    html += '<div style="font-weight:bold;margin-bottom:4px;color:#2b579a;">比例验证: ' + pr.pctHeader + ' = ' + pr.srcHeader + ' / ' + pr.denomDesc + '(' + formatNumber(pr.denomValue) + ')</div>';
+                    html += '<div style="font-size:11px;color:#555;margin-bottom:4px;padding:2px 0;border-bottom:1px dashed #ccc;">结论：相同 ' + (pr.sameCount || 0) + ' 个，不同 ' + (pr.diffCount || 0) + ' 个，源数值无效 ' + (pr.invalidCount || 0) + ' 个</div>';
+                    html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+                    html += '<tr style="background:#f5f5f5;"><th style="padding:3px 6px;text-align:left;border:1px solid #ddd;">行</th><th style="padding:3px 6px;text-align:right;border:1px solid #ddd;">' + pr.srcHeader + '</th><th style="padding:3px 6px;text-align:right;border:1px solid #ddd;">计算比例</th><th style="padding:3px 6px;text-align:right;border:1px solid #ddd;">表中比例</th><th style="padding:3px 6px;text-align:right;border:1px solid #ddd;">差额</th><th style="padding:3px 6px;text-align:center;border:1px solid #ddd;">状态</th></tr>';
+                    for (var ri = 0; ri < (pr.rows ? pr.rows.length : 0); ri++) {
+                        var rr = pr.rows[ri];
+                        html += '<tr>';
+                        html += '<td style="padding:3px 6px;border:1px solid #ddd;">' + rr.row + '</td>';
+                        if (rr.computed === null) {
+                            html += '<td colspan="4" style="padding:3px 6px;border:1px solid #ddd;color:#999;">' + (rr.note || '—') + '</td>';
+                        } else {
+                            html += '<td style="padding:3px 6px;text-align:right;border:1px solid #ddd;">' + formatNumber(rr.sourceValue) + '</td>';
+                            html += '<td style="padding:3px 6px;text-align:right;border:1px solid #ddd;">' + rr.computed.toFixed(2) + '%</td>';
+                            html += '<td style="padding:3px 6px;text-align:right;border:1px solid #ddd;">' + rr.expected.toFixed(2) + '%</td>';
+                            html += '<td style="padding:3px 6px;text-align:right;border:1px solid #ddd;color:' + (Math.abs(rr.diff) < 0.1 ? '#1a7f37' : '#cf222e') + ';">' + (rr.diff > 0 ? '+' : '') + rr.diff.toFixed(2) + '%</td>';
+                            html += '<td style="padding:3px 6px;text-align:center;border:1px solid #ddd;"><span class="np-badge ' + (rr.pass ? 'np-badge-ok' : 'np-badge-fail') + '">' + (rr.pass ? '通过' : '不通过') + '</span></td>';
+                        }
+                        html += '</tr>';
+                    }
+                    html += '</table>';
+                    html += '</div>';
+                }
+            }
+
+            return html;
+        }
+    });
+
+    function parseTable(text) {
+        if (!text || !text.trim()) return null;
+        var lines = text.split(/[\n\r]+/);
+        lines = lines.filter(function(l) { return l.trim(); });
+        if (lines.length < 2) return null;
+
+        var headerRowsEl = document.getElementById('npOptHeaderRows');
+        var headerRowCount = headerRowsEl ? parseInt(headerRowsEl.value) || 1 : 1;
+
+        var splitRegex = detectDelimiter(lines);
+
+        // 合并多行表头
+        var headers = [];
+        if (headerRowCount <= 1) {
+            headers = lines[0].split(splitRegex).map(function(s, ci) {
+                var val = s.trim();
+                return val || ('列' + (ci + 1));
+            });
+        } else {
+            var colCount = lines[0].split(splitRegex).length;
+            for (var c = 0; c < colCount; c++) {
+                var combined = '';
+                for (var hr = 0; hr < Math.min(headerRowCount, lines.length); hr++) {
+                    var cells = lines[hr].split(splitRegex);
+                    var cellVal = (cells[c] || '').trim();
+                    if (cellVal) {
+                        if (combined) combined += '+';
+                        combined += cellVal;
+                    }
+                }
+                headers.push(combined || ('列' + (c + 1)));
+            }
+        }
+        if (headers.length < 2) return null;
+
+        var dataRows = [];
+        var textRows = [];
+        for (var i = headerRowCount; i < lines.length; i++) {
+            var cells = lines[i].split(splitRegex).map(function(s) { return s.trim(); });
+            var row = [];
+            var textRow = [];
+            for (var c = 0; c < headers.length; c++) {
+                textRow.push(cells[c] || '');
+                var val = null;
+                if (cells[c] !== undefined && cells[c] !== '') {
+                    val = parseNumber(cells[c]);
+                }
+                row.push(val);
+            }
+            dataRows.push(row);
+            textRows.push(textRow);
+        }
+
+        var hasTotalEl = document.getElementById('npOptHasTotal');
+        var hasTotal = hasTotalEl ? hasTotalEl.checked : true;
+        var totals = null;
+        if (hasTotal && dataRows.length > 0) {
+            totals = dataRows[dataRows.length - 1].slice();
+        }
+
+        return { headers: headers, dataRows: dataRows, textRows: textRows, totals: totals };
+    }
+
+    function parseHtmlTable(html) {
+        try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(html, 'text/html');
+            var table = doc.querySelector('table');
+            if (!table) return null;
+
+            var rows = table.querySelectorAll('tr');
+            if (rows.length < 2) return null;
+
+            var maxCols = 0;
+            var rawRows = [];
+            for (var r = 0; r < rows.length; r++) {
+                var cells = rows[r].querySelectorAll('td,th');
+                var cellTexts = [];
+                for (var c = 0; c < cells.length; c++) {
+                    var colspan = parseInt(cells[c].getAttribute('colspan')) || 1;
+                    var rowspan = parseInt(cells[c].getAttribute('rowspan')) || 1;
+                    var text = cells[c].textContent.trim();
+                    cellTexts.push({ text: text, colspan: colspan, rowspan: rowspan });
+                }
+                if (cellTexts.length === 0) continue;
+                var totalSpan = 0;
+                for (var s = 0; s < cellTexts.length; s++) totalSpan += cellTexts[s].colspan;
+                if (totalSpan > maxCols) maxCols = totalSpan;
+                rawRows.push(cellTexts);
+            }
+
+            if (maxCols === 0) return null;
+
+            // 构建网格，处理 rowspan 和 colspan
+            var grid = [];
+            for (var ri = 0; ri < rawRows.length; ri++) {
+                grid[ri] = new Array(maxCols).fill(null);
+            }
+
+            var rowSpans = []; // 跟踪 rowspan 占用的单元格
+            for (var ri = 0; ri < rawRows.length; ri++) {
+                var row = rawRows[ri];
+                var colIdx = 0;
+                var rowSpanIdx = 0;
+
+                for (var ci = 0; ci < row.length; ci++) {
+                    while (colIdx < maxCols && (grid[ri][colIdx] !== null ||
+                        (rowSpans[colIdx] && rowSpans[colIdx] > ri))) {
+                        colIdx++;
+                    }
+                    if (colIdx >= maxCols) break;
+
+                    var span = row[ci].colspan;
+                    var rspan = row[ci].rowspan;
+
+                    for (var sp = 0; sp < span; sp++) {
+                        if (colIdx + sp < maxCols) {
+                            grid[ri][colIdx + sp] = row[ci].text;
+                        }
+                    }
+
+                    // 处理 rowspan（跨越后续行）
+                    if (rspan > 1) {
+                        for (var rs = 1; rs < rspan; rs++) {
+                            if (ri + rs < rawRows.length) {
+                                for (var sp = 0; sp < span; sp++) {
+                                    if (colIdx + sp < maxCols) {
+                                        grid[ri + rs][colIdx + sp] = '';
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    colIdx += span;
+                }
+            }
+
+            // 使用用户指定的表头行数
+            var headerRowsEl2 = document.getElementById('npOptHeaderRows');
+            var headerRowCount2 = headerRowsEl2 ? parseInt(headerRowsEl2.value) || 1 : 1;
+
+            // 合并多行表头
+            var headerTexts = [];
+            if (headerRowCount2 <= 1) {
+                headerTexts = grid[0].map(function(s, ci) {
+                    var val = (s || '').trim();
+                    return val || ('列' + (ci + 1));
+                });
+            } else {
+                for (var c = 0; c < maxCols; c++) {
+                    var combined = '';
+                    for (var hr = 0; hr < Math.min(headerRowCount2, grid.length); hr++) {
+                        var cellVal = grid[hr][c];
+                        if (cellVal && cellVal.trim()) {
+                            if (combined) combined += '+';
+                            combined += cellVal.trim();
+                        }
+                    }
+                    headerTexts.push(combined || ('列' + (c + 1)));
+                }
+            }
+
+            // 数据行从表头之后开始
+            var dataStartIdx = headerRowCount2;
+            var dataRows = [];
+            var textRows = [];
+            for (var di = dataStartIdx; di < grid.length; di++) {
+                var row = [];
+                var textRow = [];
+                for (var dc = 0; dc < maxCols; dc++) {
+                    var cellText = grid[di][dc];
+                    textRow.push(cellText || '');
+                    var val = null;
+                    if (cellText !== null && cellText !== undefined && String(cellText).trim() !== '') {
+                        val = parseNumber(String(cellText));
+                    }
+                    row.push(val);
+                }
+                dataRows.push(row);
+                textRows.push(textRow);
+            }
+
+            var hasTotalEl2 = document.getElementById('npOptHasTotal');
+            var hasTotal2 = hasTotalEl2 ? hasTotalEl2.checked : true;
+            var totals2 = null;
+            if (hasTotal2 && dataRows.length > 0) {
+                totals2 = dataRows[dataRows.length - 1].slice();
+            }
+
+            return { headers: headerTexts, dataRows: dataRows, textRows: textRows, totals: totals2 };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function detectDelimiter(lines) {
+        var firstTabs = lines[0].split(/\t/).length;
+        if (firstTabs >= 2) return /\t/;
+
+        var maxCols = 0;
+        for (var i = 0; i < Math.min(lines.length, 10); i++) {
+            var parts = lines[i].split(/\s{2,}/);
+            if (parts.length > maxCols) maxCols = parts.length;
+        }
+        if (maxCols >= 2) return /\s{2,}/;
+
+        return /\s+/;
+    }
+    // ========== 主控制器 ==========
+    var npInput, npResult, npResultContent, npResultTitle, npModesEl, npOptionsEl;
+    var npDebounceTimer = null;
+    var npImportedData = null;
+
+    // ========== Word API 导入表格 ==========
+    function npImportWordTable() {
+        var statusEl = document.getElementById('npImportStatus');
+        if (statusEl) { statusEl.style.color = '#888'; statusEl.textContent = '正在读取Word表格…'; }
+
+        if (typeof Word === 'undefined') {
+            if (statusEl) { statusEl.style.color = '#cf222e'; statusEl.textContent = '当前不在Word环境'; }
+            return;
+        }
+
+        Word.run(function(ctx) {
+            var tables = ctx.document.body.tables;
+            tables.load('items');
+            var selRange = ctx.document.getSelection().getRange();
+            selRange.load(['start', 'end']);
+            var isCollapsed = selRange.load('isCollapsed');
+
+            return ctx.sync().then(function() {
+                if (!tables.items || tables.items.length === 0) {
+                    throw new Error('文档中没有表格');
+                }
+
+                var caret = selRange.start;
+                var selEnd = selRange.end;
+                var tblRanges = [];
+
+                for (var i = 0; i < tables.items.length; i++) {
+                    var r = tables.items[i].getRange();
+                    r.load(['start', 'end']);
+                    tblRanges.push(r);
+                }
+
+                return ctx.sync().then(function() {
+                    var bestIdx = -1, bestStart = -Infinity;
+                    for (var j = 0; j < tblRanges.length; j++) {
+                        var start = tblRanges[j].start;
+                        var end = tblRanges[j].end;
+                        if (start <= caret && caret < end && start > bestStart) {
+                            bestStart = start;
+                            bestIdx = j;
+                        }
+                    }
+
+                    if (bestIdx < 0) {
+                        throw new Error('光标不在表格内，请把光标放入表格单元格');
+                    }
+
+                    var tbl = tables.items[bestIdx];
+                    tbl.load('values');
+
+                    // 检测是否选中了表格的一部分
+                    var isPartialSelection = (!isCollapsed && selEnd > caret &&
+                        caret >= tblRanges[bestIdx].start && selEnd <= tblRanges[bestIdx].end);
+
+                    return ctx.sync().then(function() {
+                        var data2d = tbl.values;
+                        if (!data2d || data2d.length === 0) {
+                            throw new Error('该表格为空');
+                        }
+
+                        console.log('tbl.values 原始数据:', data2d);
+
+                        // 如果选中了表格的一部分，只导入选中的行
+                        if (isPartialSelection) {
+                            var rows = tbl.rows;
+                            rows.load('items');
+
+                            return ctx.sync().then(function() {
+                                var selectedRowIndices = [];
+                                for (var ri = 0; ri < rows.items.length; ri++) {
+                                    var rowRange = rows.items[ri].getRange();
+                                    rowRange.load(['start', 'end']);
+                                }
+
+                                return ctx.sync().then(function() {
+                                    for (var rj = 0; rj < rows.items.length; rj++) {
+                                        var rStart = rows.items[rj].getRange().start;
+                                        var rEnd = rows.items[rj].getRange().end;
+                                        if (rStart < selEnd && rEnd > caret) {
+                                            selectedRowIndices.push(rj);
+                                        }
+                                    }
+
+                                    var selectedData = [];
+                                    for (var si = 0; si < selectedRowIndices.length; si++) {
+                                        selectedData.push(data2d[selectedRowIndices[si]]);
+                                    }
+
+                                    npProcessImportedData(selectedData, statusEl, '选中区域');
+                                });
+                            });
+                        } else {
+                            npProcessImportedData(data2d, statusEl, '整个表格');
+                        }
+                    });
+                });
+            });
+        }).catch(function(err) {
+            if (statusEl) {
+                statusEl.style.color = '#cf222e';
+                statusEl.textContent = '导入失败：' + (err.message || err);
+            }
+        });
+    }
+
+    // 检测一行中是否存在重复模式，返回模式长度
+    function findPatternLength(row, expectedGroups) {
+        if (!row || row.length < 4) return 1;
+
+        // 尝试不同的模式长度
+        var maxPatternLen = Math.floor(row.length / 2);
+        for (var plen = 2; plen <= maxPatternLen; plen++) {
+            // 检查模式是否重复足够多次
+            var patternCount = Math.floor(row.length / plen);
+            if (patternCount < 2) continue;
+
+            // 验证模式是否真的重复
+            var isPattern = true;
+            for (var p = 0; p < plen; p++) {
+                var baseVal = String(row[p] || '').trim();
+                for (var g = 1; g < patternCount; g++) {
+                    var checkVal = String(row[g * plen + p] || '').trim();
+                    if (baseVal !== checkVal) {
+                        // 允许空值不匹配（因为可能有合并单元格的空值）
+                        if (baseVal !== '' && checkVal !== '') {
+                            isPattern = false;
+                            break;
+                        }
+                    }
+                }
+                if (!isPattern) break;
+            }
+
+            if (isPattern) return plen;
+        }
+
+        return 1;
+    }
+
+    function npProcessImportedData(data2d, statusEl, sourceDesc) {
+        if (!data2d || data2d.length === 0) {
+            throw new Error('数据为空');
+        }
+
+        // 调试：显示原始数据结构
+        console.log('原始数据:', data2d);
+        console.log('每行长度:', data2d.map(function(r) { return r.length; }));
+
+        var headerRowsEl = document.getElementById('npOptHeaderRows');
+        var headerRowCount = headerRowsEl ? parseInt(headerRowsEl.value) : 1;
+        if (isNaN(headerRowCount) || headerRowCount < 0) headerRowCount = 1;
+
+        // 从数据行推断实际列数（因为合并表头的行长度可能不同）
+        // 优先看数据行（非表头行）的长度
+        var colCount = 0;
+        if (data2d.length > headerRowCount) {
+            // 取数据行中最长的
+            for (var r = headerRowCount; r < data2d.length; r++) {
+                if (data2d[r].length > colCount) colCount = data2d[r].length;
+            }
+        }
+        // 如果没有数据行或数据行长度为0，取最长的行
+        if (colCount === 0) {
+            for (var r2 = 0; r2 < data2d.length; r2++) {
+                if (data2d[r2].length > colCount) colCount = data2d[r2].length;
+            }
+        }
+
+        console.log('推断列数:', colCount);
+
+        // 智能补全短行（处理合并表头的 colspan）
+        for (var r3 = 0; r3 < data2d.length; r3++) {
+            if (data2d[r3].length < colCount) {
+                var shortRow = data2d[r3];
+
+                // 尝试从下一行（表头行或数据行）推断 colspan
+                // 检测下一行的重复模式来确定每个单元格跨几列
+                var spans = null;
+                if (r3 + 1 < data2d.length) {
+                    var nextRow = data2d[r3 + 1];
+                    // 找到下一行中的重复模式长度
+                    var patternLen = findPatternLength(nextRow, shortRow.length);
+                    if (patternLen > 1) {
+                        // 按 patternLen 分割 shortRow，除第一个元素外，每个元素跨 patternLen 列
+                        spans = [];
+                        spans.push(1); // 第一个元素（项目列）通常跨1列
+                        for (var si = 1; si < shortRow.length; si++) {
+                            spans.push(patternLen);
+                        }
+                    }
+                }
+
+                if (spans) {
+                    // 按 span 扩展
+                    var expanded = [];
+                    for (var ei = 0; ei < shortRow.length; ei++) {
+                        var val = shortRow[ei];
+                        var span = spans[ei] || 1;
+                        for (var es = 0; es < span; es++) {
+                            expanded.push(val);
+                        }
+                    }
+                    // 如果还不够，用最后一个值填充
+                    while (expanded.length < colCount) {
+                        expanded.push(shortRow[shortRow.length - 1]);
+                    }
+                    data2d[r3] = expanded;
+                } else {
+                    // 简单填充：复制最后一个值
+                    var lastVal = shortRow[shortRow.length - 1];
+                    while (shortRow.length < colCount) {
+                        shortRow.push(lastVal);
+                    }
+                }
+            }
+        }
+
+        console.log('补全后数据:', data2d);
+
+        // 存储原始文本（用于显示行标签）和解析后的数字（用于计算）
+        var npData = { headers: [], dataRows: [], textRows: [], totals: null };
+
+        // 无表头情况
+        if (headerRowCount === 0) {
+            var headers = [];
+            for (var c = 0; c < colCount; c++) {
+                headers.push('列' + (c + 1));
+            }
+
+            var dataRows = [];
+            var textRows = [];
+            for (var r = 0; r < data2d.length; r++) {
+                var row = [];
+                var textRow = [];
+                for (var c = 0; c < colCount; c++) {
+                    var cellVal = data2d[r][c];
+                    textRow.push(cellVal !== null && cellVal !== undefined ? String(cellVal) : '');
+                    var val = null;
+                    if (cellVal !== null && cellVal !== undefined && String(cellVal).trim() !== '') {
+                        val = parseNumber(String(cellVal));
+                    }
+                    row.push(val);
+                }
+                dataRows.push(row);
+                textRows.push(textRow);
+            }
+
+            npData.headers = headers;
+            npData.dataRows = dataRows;
+            npData.textRows = textRows;
+
+            var textLines = [headers.join('\t')];
+            for (var r2 = 0; r2 < data2d.length; r2++) {
+                textLines.push(data2d[r2].map(function(v) { return v !== null && v !== undefined ? String(v) : ''; }).join('\t'));
+            }
+            npInput.value = textLines.join('\n');
+
+            if (statusEl) {
+                statusEl.style.color = '#1a7f37';
+                statusEl.textContent = '已导入: ' + sourceDesc + ' ' + data2d.length + ' 行 × ' + colCount + ' 列（无表头）';
+            }
+        } else {
+            // 有表头情况
+            var headers = [];
+            if (headerRowCount <= 1) {
+                headers = data2d[0].map(function(s, ci) {
+                    var val = String(s).trim();
+                    return val || ('列' + (ci + 1));
+                });
+            } else {
+                for (var c = 0; c < colCount; c++) {
+                    var combined = '';
+                    for (var hr = 0; hr < Math.min(headerRowCount, data2d.length); hr++) {
+                        var cellVal = String(data2d[hr][c] || '').trim();
+                        if (cellVal) {
+                            if (combined) combined += '+';
+                            combined += cellVal;
+                        }
+                    }
+                    headers.push(combined || ('列' + (c + 1)));
+                }
+            }
+
+            var dataRows = [];
+            var textRows = [];
+            for (var r = headerRowCount; r < data2d.length; r++) {
+                var row = [];
+                var textRow = [];
+                for (var c = 0; c < colCount; c++) {
+                    var cellVal = data2d[r][c];
+                    textRow.push(cellVal !== null && cellVal !== undefined ? String(cellVal) : '');
+                    var val = null;
+                    if (cellVal !== null && cellVal !== undefined && String(cellVal).trim() !== '') {
+                        val = parseNumber(String(cellVal));
+                    }
+                    row.push(val);
+                }
+                dataRows.push(row);
+                textRows.push(textRow);
+            }
+
+            npData.headers = headers;
+            npData.dataRows = dataRows;
+            npData.textRows = textRows;
+
+            var textLines = [headers.join('\t')];
+            for (var r2 = 0; r2 < data2d.length; r2++) {
+                textLines.push(data2d[r2].map(function(v) { return v !== null && v !== undefined ? String(v) : ''; }).join('\t'));
+            }
+            npInput.value = textLines.join('\n');
+
+            if (statusEl) {
+                statusEl.style.color = '#1a7f37';
+                statusEl.textContent = '已导入: ' + sourceDesc + ' ' + data2d.length + ' 行 × ' + colCount + ' 列（表头' + headerRowCount + '行，数据' + dataRows.length + '行）';
+            }
+        }
+
+        npImportedData = npData;
+        console.log('最终导入数据:', npImportedData);
+
+        npRenderOptions();
+        npCalculate();
+    }
+
+    // ========== 状态持久化（刷新后恢复数据和结果） ==========
+    var NP_STATE_KEY = 'digitalpanel_state_v1';
+    var npSavedState = null;
+    var npLastOfficeSave = 0;
+
+    // 双通道存储：localStorage 保存完整状态；Office 文档设置保存精简状态（不含导入表，避免文档膨胀）。
+    // 两者同时写入：部分 Office WebView 中 localStorage 看似成功但刷新后不持久，此时文档设置可兜底。
+    function npStorageSave(jsonStr, jsonStrLight) {
+        var localOk = false;
+        try {
+            localStorage.setItem(NP_STATE_KEY, jsonStr);
+            localOk = true;
+            if (typeof console !== 'undefined') console.log('[npState] saved via localStorage');
+        } catch (e) {
+            if (typeof console !== 'undefined') console.warn('[npState] localStorage save failed:', e && e.message);
+        }
+        try {
+            if (typeof Office !== 'undefined' && Office.context && Office.context.document && Office.context.document.settings) {
+                // 节流 Office 设置写入，避免输入过程中频繁写文档
+                var now = Date.now();
+                if (now - npLastOfficeSave > 800) {
+                    npLastOfficeSave = now;
+                    Office.context.document.settings.set('npState', jsonStrLight || jsonStr);
+                    Office.context.document.settings.saveAsync(function(ar) {
+                        if (typeof console !== 'undefined') {
+                            if (ar && ar.status === Office.AsyncResultStatus.Succeeded) {
+                                console.log('[npState] saved via Office settings');
+                            } else {
+                                console.warn('[npState] Office settings saveAsync failed:', ar && ar.error && ar.error.message);
+                            }
+                        }
+                    });
+                }
+                return true;
+            }
+        } catch (e2) {
+            if (typeof console !== 'undefined') console.warn('[npState] Office settings save failed:', e2 && e2.message);
+        }
+        if (!localOk && typeof console !== 'undefined') console.error('[npState] BOTH storage channels failed');
+        return localOk;
+    }
+
+    function npStorageLoad() {
+        try {
+            var raw = localStorage.getItem(NP_STATE_KEY);
+            if (raw) {
+                if (typeof console !== 'undefined') console.log('[npState] loaded via localStorage');
+                return raw;
+            }
+        } catch (e) {
+            if (typeof console !== 'undefined') console.warn('[npState] localStorage load failed:', e && e.message);
+        }
+        try {
+            if (typeof Office !== 'undefined' && Office.context && Office.context.document && Office.context.document.settings) {
+                var v = Office.context.document.settings.get('npState');
+                if (v) {
+                    if (typeof console !== 'undefined') console.log('[npState] loaded via Office settings');
+                    return v;
+                }
+            }
+        } catch (e2) {
+            if (typeof console !== 'undefined') console.warn('[npState] Office settings load failed:', e2 && e2.message);
+        }
+        if (typeof console !== 'undefined') console.warn('[npState] no saved state found');
+        return null;
+    }
+
+    function npSaveState() {
+        try {
+            var sumCols = [];
+            var sumChecks = document.querySelectorAll('.np-sum-col:checked');
+            for (var i = 0; i < sumChecks.length; i++) {
+                sumCols.push(parseInt(sumChecks[i].dataset.col));
+            }
+            var hEl = document.getElementById('npOptHasTotal');
+            var hrEl = document.getElementById('npOptHeaderRows');
+            var pcEl = document.getElementById('npPctCol');
+            var psEl = document.getElementById('npPctSrcCol');
+            var pdEl = document.getElementById('npPctDenom');
+            var pvEl = document.getElementById('npPctDenomVal');
+
+            var stateObj = {
+                mode: npCurrentMode,
+                input: npInput ? npInput.value : '',
+                imported: npImportedData,
+                rowConfig: npRowConfig,
+                subStart: npSubStartConfig,
+                hasTotal: hEl ? hEl.checked : true,
+                headerRows: hrEl ? (parseInt(hrEl.value) || 1) : 1,
+                sumCols: sumCols,
+                pctCol: pcEl ? pcEl.value : '',
+                pctSrcCol: psEl ? psEl.value : '',
+                pctDenom: pdEl ? pdEl.value : 'sum',
+                pctDenomVal: pvEl ? pvEl.value : '',
+                pctGroups: []
+            };
+            var pctGroupArr = [];
+            var grpContainer2 = document.getElementById('npPctGroups');
+            if (grpContainer2) {
+                // 每个新增组是一个顶层 div（含标题 + 配置行 + 可选删除按钮）
+                var grpDivs2 = grpContainer2.children;
+                for (var gd2 = 0; gd2 < grpDivs2.length; gd2++) {
+                    var grpSelects2 = grpDivs2[gd2].querySelectorAll('select');
+                    if (grpSelects2.length >= 3) {
+                        var gColV = grpSelects2[0].value;
+                        var gSrcV = grpSelects2[1].value;
+                        var gDenomV = grpSelects2[2].value;
+                        var gValEl2 = grpDivs2[gd2].querySelector('input[type="number"]');
+                        if (gColV !== '' && gColV !== '-- 选择 --' && gSrcV !== '' && gSrcV !== '-- 选择 --') {
+                            pctGroupArr.push({
+                                pctCol: gColV,
+                                pctSrcCol: gSrcV,
+                                pctDenom: gDenomV || 'sum',
+                                pctDenomVal: gValEl2 ? gValEl2.value : ''
+                            });
+                        }
+                    }
+                }
+            }
+            stateObj.pctGroups = pctGroupArr;
+
+            // Office 文档设置中不保存整张导入表（避免文档体积膨胀），刷新后可由输入文本重新解析
+            var stateObjLight = {};
+            for (var k in stateObj) {
+                if (k !== 'imported') stateObjLight[k] = stateObj[k];
+            }
+            npStorageSave(JSON.stringify(stateObj), JSON.stringify(stateObjLight));
+            // 同步内存快照，保证后续重渲染（输入防抖、切换选项等）恢复的是最新勾选
+            npSavedState = stateObj;
+        } catch (e) { /* 状态序列化失败（如数据过大）静默忽略 */ }
+    }
+
+    function npLoadState() {
+        var raw = npStorageLoad();
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function npInit() {
+        npInput = document.getElementById('npInput');
+        npResult = document.getElementById('npResult');
+        npResultContent = document.getElementById('npResultContent');
+        npResultTitle = document.getElementById('npResultTitle');
+        npModesEl = document.getElementById('npModes');
+        npOptionsEl = document.getElementById('npOptions');
+
+        // 恢复上次会话状态（刷新后保留数据和结果）
+        var savedState = npLoadState();
+        if (savedState) {
+            if (savedState.mode && npModes[savedState.mode]) npCurrentMode = savedState.mode;
+            if (typeof savedState.input === 'string') npInput.value = savedState.input;
+            if (savedState.imported) npImportedData = savedState.imported;
+            if (savedState.rowConfig) npRowConfig = savedState.rowConfig;
+            if (savedState.subStart) npSubStartConfig = savedState.subStart;
+            npSavedState = savedState;
+            var subCnt = 0;
+            if (npSubStartConfig) {
+                for (var sci = 0; sci < npSubStartConfig.length; sci++) {
+                    if (npSubStartConfig[sci]) subCnt++;
+                }
+            }
+            if (typeof console !== 'undefined') console.log('[npState] restored: mode=' + npCurrentMode + ', rows=' + (npRowConfig ? npRowConfig.length : 0) + ', subStart=' + subCnt + ', imported=' + (npImportedData ? 'yes' : 'no'));
+        }
+
+        var html = '';
+        for (var id in npModes) {
+            html += '<button class="np-mode-btn' + (id === npCurrentMode ? ' active' : '') +
+                '" data-mode="' + id + '">' + npModes[id].name + '</button>';
+        }
+        npModesEl.innerHTML = html;
+
+        npModesEl.addEventListener('click', function(e) {
+            var btn = e.target.closest('.np-mode-btn');
+            if (!btn) return;
+            npCurrentMode = btn.dataset.mode;
+            var btns = npModesEl.querySelectorAll('.np-mode-btn');
+            for (var i = 0; i < btns.length; i++) {
+                btns[i].classList.toggle('active', btns[i].dataset.mode === npCurrentMode);
+            }
+            npInput.placeholder = npGetPlaceholder(npCurrentMode);
+            npRenderOptions();
+            npCalculate();
+        });
+
+        npInput.addEventListener('input', function() {
+            clearTimeout(npDebounceTimer);
+            npDebounceTimer = setTimeout(function() {
+                npRenderOptions();
+                npCalculate();
+            }, 200);
+        });
+
+        npInput.addEventListener('paste', function(e) {
+            var html = null;
+            if (e && e.clipboardData) {
+                html = e.clipboardData.getData('text/html');
+            }
+            if (html && /<table[\s>]/i.test(html)) {
+                e.preventDefault();
+                var parsed = parseHtmlTable(html);
+                if (parsed && parsed.headers && parsed.headers.length >= 2) {
+                    var textLines = [parsed.headers.join('\t')];
+                    for (var r = 0; r < parsed.dataRows.length; r++) {
+                        textLines.push(parsed.dataRows[r].map(function(v) { return v !== null && v !== undefined ? String(v) : ''; }).join('\t'));
+                    }
+                    npInput.value = textLines.join('\n');
+                    npImportedData = parsed;
+                    var statusEl = document.getElementById('npImportStatus');
+                    if (statusEl) {
+                        statusEl.style.color = '#1a7f37';
+                        statusEl.textContent = '已解析HTML表格: ' + parsed.dataRows.length + ' 行 × ' + parsed.headers.length + ' 列';
+                    }
+                    npRenderOptions();
+                    npCalculate();
+                    return;
+                }
+            }
+            setTimeout(function() {
+                npImportedData = null;
+                npRenderOptions();
+                npCalculate();
+            }, 0);
+        });
+
+        npInput.placeholder = npGetPlaceholder(npCurrentMode);
+        npRenderOptions();
+        npCalculate();
+    }
+
+    function npGetPlaceholder(modeId) {
+        if (modeId === 'table-verify') {
+            return '方式1: 点击「从Word导入」直接读取光标所在表格\n方式2: 粘贴表格数据（制表符/空格分隔）';
+        }
+        return '粘贴数字，每行一个，例如：\n8,135.55\n10,988.98\n12,674.42';
+    }
+
+    function npRenderOptions() {
+        var mode = npModes[npCurrentMode];
+        if (mode.options) {
+            // 保存当前用户设置的值（优先取当前DOM，其次取上次会话恢复的状态）
+            var existingHeaderRowsEl = document.getElementById('npOptHeaderRows');
+            var savedHeaderRows = existingHeaderRowsEl ? (parseInt(existingHeaderRowsEl.value) || 1) : (npSavedState && npSavedState.headerRows ? npSavedState.headerRows : 1);
+            var existingHasTotalEl = document.getElementById('npOptHasTotal');
+            var savedHasTotal = existingHasTotalEl ? existingHasTotalEl.checked : (npSavedState ? (npSavedState.hasTotal !== undefined ? npSavedState.hasTotal : true) : true);
+
+            npOptionsEl.innerHTML = mode.options();
+
+            // 恢复用户设置的值
+            var newHeaderRowsEl = document.getElementById('npOptHeaderRows');
+            if (newHeaderRowsEl) {
+                newHeaderRowsEl.value = savedHeaderRows;
+            }
+            var newHasTotalEl = document.getElementById('npOptHasTotal');
+            if (newHasTotalEl) {
+                newHasTotalEl.checked = savedHasTotal;
+            }
+
+            npOptionsEl.style.display = 'block';
+            if (mode.updateOptions) mode.updateOptions(npInput.value);
+
+            // 恢复保存的新增列验证组（刷新后保留按钮组）
+            try {
+                var savedGroups = npSavedState && npSavedState.pctGroups ? npSavedState.pctGroups : [];
+                // 用当前输入解析表头（避免引用未定义的 parsed 变量导致崩溃）
+                var grpHeaders = [];
+                try {
+                    var grpParsedTmp = npImportedData || parseTable(npInput ? npInput.value : '');
+                    if (grpParsedTmp && grpParsedTmp.headers) grpHeaders = grpParsedTmp.headers;
+                } catch (e2) { grpHeaders = []; }
+                for (var sg = 0; sg < savedGroups.length; sg++) {
+                    var grpItem = savedGroups[sg];
+                    if (!grpItem || grpItem.pctCol === undefined) continue;
+                    var grpDiv = document.createElement('div');
+                    grpDiv.style.cssText = 'margin-top:6px;padding-top:6px;border-top:1px dashed #aaa;background:#f8f9fa;border-radius:3px;padding:6px;';
+                    grpDiv.innerHTML = '<div style="font-size:12px;font-weight:bold;color:#2b579a;margin-bottom:4px;">新增列验证组 · 组' + (sg + 1) + '</div>' +
+                        '<div style="font-size:11px;color:#555;">比例列: <select id="npPctCol_' + (sg + 1) + '"><option value="">-- 选择 --</option></select> ' +
+                        '源数值列: <select id="npPctSrcCol_' + (sg + 1) + '"><option value="">-- 选择 --</option></select> ' +
+                        '分母: <select id="npPctDenom_' + (sg + 1) + '"><option value="sum">源列合计</option><option value="last">源列最后</option><option value="custom">自定义</option></select> ' +
+                        '<input type="number" id="npPctDenomVal_' + (sg + 1) + '" placeholder="值" style="width:70px;font-size:11px;padding:1px 2px;border:1px solid #ccc;border-radius:2px;display:none;margin-left:2px;" value=""></div>';
+                    var grpArea = document.getElementById('npPctGroups');
+                    if (grpArea) grpArea.appendChild(grpDiv); else pctConfig.appendChild(grpDiv);
+                    // 填充选项（使用安全解析的表头）
+                    var grpColEl = document.getElementById('npPctCol_' + (sg + 1));
+                    var grpSrcEl = document.getElementById('npPctSrcCol_' + (sg + 1));
+                    if (grpColEl && grpHeaders.length) {
+                        for (var cg = 0; cg < grpHeaders.length; cg++) grpColEl.innerHTML += '<option value="' + cg + '">' + (grpHeaders[cg] || ('列'+(cg+1))) + '</option>';
+                        grpColEl.value = grpItem.pctCol || '';
+                    }
+                    if (grpSrcEl && grpHeaders.length) {
+                        for (var sg2 = 0; sg2 < grpHeaders.length; sg2++) grpSrcEl.innerHTML += '<option value="' + sg2 + '">' + (grpHeaders[sg2] || ('列'+(sg2+1))) + '</option>';
+                        grpSrcEl.value = grpItem.pctSrcCol || grpItem.pctCol || '';
+                    }
+                    var grpDenomEl = document.getElementById('npPctDenom_' + (sg + 1));
+                    if (grpDenomEl && grpItem.pctDenom) grpDenomEl.value = grpItem.pctDenom;
+                    var grpValEl = document.getElementById('npPctDenomVal_' + (sg + 1));
+                    if (grpValEl && grpItem.pctDenomVal) grpValEl.value = grpItem.pctDenomVal;
+                    // 绑定计算触发
+                    var grpSelects = grpDiv.querySelectorAll('select');
+                    for (var gsi = 0; gsi < grpSelects.length; gsi++) {
+                        grpSelects[gsi].addEventListener('change', function() { npCalculate(); });
+                    }
+                }
+            } catch (grpErr) {
+                if (typeof console !== 'undefined') console.warn('[npState] 恢复列验证组失败:', grpErr && grpErr.message);
+            }
+
+            npOptionsEl.addEventListener('click', function(e) {
+                if (e.target.id === 'npBtnImport') {
+                    npImportedData = null;
+                    npImportWordTable();
+                }
+            });
+
+            npOptionsEl.addEventListener('change', function(e) {
+                if (e.target.id === 'npOptHasTotal') {
+                    npImportedData = null;
+                    var mode = npModes[npCurrentMode];
+                    if (mode.updateOptions) mode.updateOptions(npInput.value);
+                    npCalculate();
+                } else if (e.target.id === 'npOptHeaderRows') {
+                    npImportedData = null;
+                    var mode2 = npModes[npCurrentMode];
+                    if (mode2.updateOptions) mode2.updateOptions(npInput.value);
+                    npCalculate();
+                } else if (e.target.classList.contains('np-row-radio')) {
+                    var rowIdx = parseInt(e.target.dataset.row);
+                    if (!isNaN(rowIdx)) {
+                        npRowConfig[rowIdx] = e.target.value;
+                    }
+                    npCalculate();
+                } else if (e.target.classList.contains('np-sum-col')) {
+                    npCalculate();
+                } else if (e.target.id === 'npPctDenom') {
+                    var val = e.target.value;
+                    var customInput = document.getElementById('npPctDenomVal');
+                    if (customInput) {
+                        customInput.style.display = (val === 'custom') ? 'inline-block' : 'none';
+                    }
+                    npCalculate();
+                } else if (e.target.id === 'npPctCol' || e.target.id === 'npPctSrcCol' || e.target.id === 'npPctDenomVal') {
+                    npCalculate();
+                }
+            });
+        } else {
+            npOptionsEl.style.display = 'none';
+            npOptionsEl.innerHTML = '';
+        }
+    }
+
+    function npCalculate() {
+        npSaveState();
+        var text = npInput.value;
+        if (!text || !text.trim()) { npResult.style.display = 'none'; return; }
+
+        var mode = npModes[npCurrentMode];
+        var parsed, result;
+
+        if (mode.parseInput) {
+            parsed = mode.parseInput(text);
+            result = mode.calculate(parsed);
+        } else {
+            parsed = parseAllNumbers(text);
+            if (parsed.numbers.length < mode.minInputs) {
+                npResult.style.display = 'block';
+                npResultTitle.textContent = mode.name;
+                var msg = '请输入至少 ' + mode.minInputs + ' 个数字';
+                if (parsed.numbers.length > 0) msg += '（已识别 ' + parsed.numbers.length + ' 个）';
+                if (parsed.errors.length > 0) msg += '<br><span style="color:#cf222e;">' + parsed.errors.join('<br>') + '</span>';
+                npResultContent.innerHTML = '<div class="np-error">' + msg + '</div>';
+                return;
+            }
+            result = mode.calculate(parsed.numbers);
+        }
+
+        try {
+            var countLabel = '';
+            if (mode.parseInput) {
+                if (result.summary) countLabel = ' （' + result.summary.total + ' 项验证）';
+            } else {
+                countLabel = ' （' + parsed.numbers.length + ' 个数值）';
+            }
+            npResultTitle.textContent = mode.name + countLabel;
+            npResultContent.innerHTML = mode.render(result);
+            if (parsed && parsed.errors && parsed.errors.length > 0) {
+                npResultContent += '<div style="margin-top:6px;font-size:11px;color:#cf222e;">' +
+                    parsed.errors.join('; ') + '</div>';
+            }
+            npResult.style.display = 'block';
+        } catch (e) {
+            npResultContent.innerHTML = '<div class="np-error">计算错误: ' + e.message + '</div>';
+            npResult.style.display = 'block';
+        }
+    }
+
+    Office.onReady(function(info) {
+        npInit();
+    });
+    </script>
+</body>
+</html>

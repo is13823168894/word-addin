@@ -1,0 +1,8 @@
+# 系统垃圾文件
+Thumbs.db
+.DS_Store
+*.tmp
+*.log
+
+# 依赖目录（当前仓库无，预留）
+node_modules/

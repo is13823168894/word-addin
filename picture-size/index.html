@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>批量调整图片尺寸</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 12px; margin: 0; font-size: 13px; background: #f0f0f0; }
+        .section { margin-bottom: 14px; }
+        .section-title { color: #c00000; font-weight: bold; margin-bottom: 6px; font-size: 13px; }
+        .radio-row { margin: 4px 0; }
+        .radio-row label { margin-right: 16px; cursor: pointer; }
+        .sub-options { margin-left: 20px; margin-top: 6px; display: none; }
+        .sub-options.active { display: block; }
+        .size-row { margin: 4px 0; display: flex; align-items: center; flex-wrap: wrap; }
+        .size-row label { display: inline-block; width: 24px; color: #666; }
+        .size-row input[type="text"] { width: 58px; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; }
+        .size-row span { margin: 0 3px; color: #666; font-size: 12px; }
+        .get-size-btn { background: #ffe0e0; border: 1px solid #c00000; color: #c00000; padding: 4px 10px; cursor: pointer; font-size: 12px; margin-left: 6px; }
+        .get-size-btn:hover { background: #ffc0c0; }
+        .auto-detect-btn { background: #e0f0ff; border: 1px solid #0078d4; color: #0078d4; padding: 4px 10px; cursor: pointer; font-size: 12px; margin-left: 6px; }
+        .auto-detect-btn:hover { background: #d0e8ff; }
+        .tip { color: #666; font-size: 11px; margin-left: 6px; }
+        .page-info { color: #2b579a; font-size: 11px; margin-top: 2px; display: inline-block; }
+        .divider { border: none; border-top: 1px solid #2e7d32; margin: 10px 0; }
+        .checkbox-row { margin: 6px 0; }
+        .checkbox-row label { margin-right: 14px; cursor: pointer; color: #333; font-size: 13px; }
+        .checkbox-row label.checked-label { color: #0078d4; }
+        .checkbox-row input { margin-right: 4px; }
+        .btn-area { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; }
+        .btn { padding: 6px 18px; font-size: 13px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; }
+        .btn:hover { background: #d0d0d0; }
+        #statusText { margin-top: 10px; font-size: 12px; color: #2b579a; min-height: 16px; word-break: break-all; }
+        .folder-row { display: flex; align-items: center; margin: 4px 0; }
+        .folder-row input[type="text"] { flex: 1; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; margin-right: 6px; }
+        .folder-row .browse-btn { padding: 4px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; white-space: nowrap; }
+        .folder-row .browse-btn:hover { background: #d0d0d0; }
+        .file-count { font-size: 11px; color: #666; margin-left: 6px; white-space: nowrap; }
+        .progress-bar { width: 100%; height: 6px; background: #ddd; margin-top: 6px; display: none; border-radius: 3px; overflow: hidden; }
+        .progress-bar .fill { height: 100%; background: #2b579a; width: 0%; transition: width 0.2s; }
+        .detected-page-width { font-weight: bold; color: #0078d4; }
+    </style>
+</head>
+<body>
+    <!-- ===== 1. 范围 ===== -->
+    <div class="section">
+        <div class="section-title">范围：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="scope" value="current" checked> 当前文档</label>
+            <label><input type="radio" name="scope" value="multiple"> 多个 Word 文档</label>
+        </div>
+        <div id="folderOptions" class="sub-options">
+            <div class="folder-row">
+                <input type="text" id="folderPath" placeholder="选择包含 .docx 文件的文件夹...">
+                <button id="browseBtn" class="browse-btn">选择文件夹</button>
+                <span id="fileCount" class="file-count"></span>
+            </div>
+            <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;" accept=".docx">
+        </div>
+    </div>
+
+    <!-- ===== 2. 限定要修改的图片 ===== -->
+    <div class="section">
+        <div class="section-title">限定要修改的图片：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="filterType" value="all"> 全部图片</label>
+            <label><input type="radio" name="filterType" value="minsize" checked> 限制最小尺寸（宽和高&#12288;&#37117;&#12288;&#22823;&#20110;指定值的才修改）</label>
+        </div>
+        <div id="minSizeOptions" class="sub-options active">
+            <div class="size-row">
+                <label>宽 &gt;</label>
+                <input type="text" id="minWidthInput" value="6">
+                <span>CM</span>
+                <label style="margin-left:8px;">高 &gt;</label>
+                <input type="text" id="minHeightInput" value="4">
+                <span>CM</span>
+            </div>
+            <div class="size-row">
+                <button id="getSizeBtn" class="get-size-btn">获取尺寸</button>
+                <span class="tip">选中一张图片后点击获取其宽高</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 3. 修改后尺寸 ===== -->
+    <div class="section">
+        <div class="section-title">修改后尺寸：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="targetSizeType" value="page" checked> 自动适应页面（可用宽度减指定边距，等比缩放）</label>
+            <label><input type="radio" name="targetSizeType" value="manual"> 指定宽度（等比缩放）</label>
+        </div>
+        <div id="pageAutoOptions" class="sub-options active">
+            <div class="size-row">
+                <button id="detectPageBtn" class="auto-detect-btn">检测页面尺寸</button>
+                <span id="pageWidthText" class="page-info">点击检测当前文档页面宽度和页边距</span>
+            </div>
+            <div class="size-row">
+                <label>减</label>
+                <input type="text" id="marginInput" value="1" style="width:40px;">
+                <span>CM（目标宽 = 可用宽度 − 此值）</span>
+            </div>
+        </div>
+        <div class="size-row">
+            <label>宽</label>
+            <input type="text" id="targetWidthInput" value="16">
+            <span>CM</span>
+            <label style="margin-left:10px;">高</label>
+            <input type="text" id="targetHeightInput" value="" placeholder="按比例">
+            <span>CM <span class="tip">（留空 = 按原始比例自动缩放高度）</span></span>
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="checkbox-row">
+        <label id="lblInline"><input type="checkbox" id="inlinePics" checked> 嵌入式图片</label>
+        <label id="lblShapes"><input type="checkbox" id="shapes" checked> 图形</label>
+        <label id="lblTextBoxes"><input type="checkbox" id="textBoxes"> 文本框</label>
+    </div>
+
+    <div class="btn-area">
+        <button id="defaultBtn" class="btn">默认设置</button>
+        <button id="okBtn" class="btn btn-primary">调整尺寸</button>
+    </div>
+
+    <div id="progressBar" class="progress-bar"><div id="progressFill" class="fill"></div></div>
+
+    <p id="statusText">就绪</p>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    // ===== 常量 =====
+    var CM_TO_POINT = 28.3464567;
+    var EMU_PER_CM = 360000;
+    var TWIP_PER_CM = 567;
+
+    var W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    var WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+    var A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+    var PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+    var R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+    // ===== 全局引用 =====
+    var statusEl, targetWidthInput, targetHeightInput;
+    var folderPath, fileCount, folderInput, progressBar, progressFill;
+    var selectedFiles = [];
+    var detectedUsableWidthCm = 0;  // 缓存的页面可用宽度（cm，已扣除左/右边距）
+
+    // ===== UI 初始化 =====
+    function initUI() {
+        statusEl = document.getElementById('statusText');
+        targetWidthInput = document.getElementById('targetWidthInput');
+        targetHeightInput = document.getElementById('targetHeightInput');
+        folderPath = document.getElementById('folderPath');
+        fileCount = document.getElementById('fileCount');
+        folderInput = document.getElementById('folderInput');
+        progressBar = document.getElementById('progressBar');
+        progressFill = document.getElementById('progressFill');
+
+        // 范围切换
+        var scopeRadios = document.getElementsByName('scope');
+        for (var i = 0; i < scopeRadios.length; i++) {
+            scopeRadios[i].onclick = onScopeChange;
+        }
+
+        // 筛选类型切换
+        var filterRadios = document.getElementsByName('filterType');
+        for (var i = 0; i < filterRadios.length; i++) {
+            filterRadios[i].onclick = onFilterTypeChange;
+        }
+
+        // 目标尺寸类型切换
+        var targetRadios = document.getElementsByName('targetSizeType');
+        for (var i = 0; i < targetRadios.length; i++) {
+            targetRadios[i].onclick = onTargetSizeTypeChange;
+        }
+
+        document.getElementById('getSizeBtn').onclick = doGetSize;
+        document.getElementById('detectPageBtn').onclick = doDetectPageWidth;
+        document.getElementById('defaultBtn').onclick = doDefault;
+        document.getElementById('okBtn').onclick = doResize;
+        document.getElementById('browseBtn').onclick = doBrowseFolder;
+        folderInput.onchange = onFolderSelected;
+
+        var cbs = document.querySelectorAll('.checkbox-row input[type="checkbox"]');
+        for (var i = 0; i < cbs.length; i++) {
+            cbs[i].onchange = updateCheckboxStyle;
+        }
+
+        onScopeChange();
+        onFilterTypeChange();
+        onTargetSizeTypeChange();
+        updateCheckboxStyle();
+    }
+
+    function updateCheckboxStyle() {
+        var cb = document.getElementById('inlinePics');
+        document.getElementById('lblInline').className = cb.checked ? 'checked-label' : '';
+        cb = document.getElementById('shapes');
+        document.getElementById('lblShapes').className = cb.checked ? 'checked-label' : '';
+        cb = document.getElementById('textBoxes');
+        document.getElementById('lblTextBoxes').className = cb.checked ? 'checked-label' : '';
+    }
+
+    function onScopeChange() {
+        var scope = getCheckedValue('scope');
+        document.getElementById('folderOptions').className = scope === 'multiple' ? 'sub-options active' : 'sub-options';
+        if (scope === 'current') {
+            statusEl.textContent = '就绪';
+        } else {
+            statusEl.textContent = selectedFiles.length > 0 ? ('已选择 ' + selectedFiles.length + ' 个文件') : '请选择文件夹';
+        }
+    }
+
+    function onFilterTypeChange() {
+        var ft = getCheckedValue('filterType');
+        document.getElementById('minSizeOptions').className = ft === 'minsize' ? 'sub-options active' : 'sub-options';
+    }
+
+    function onTargetSizeTypeChange() {
+        var tt = getCheckedValue('targetSizeType');
+        document.getElementById('pageAutoOptions').className = tt === 'page' ? 'sub-options active' : 'sub-options';
+    }
+
+    function getCheckedValue(name) {
+        var radios = document.getElementsByName(name);
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) return radios[i].value;
+        }
+        return '';
+    }
+
+    function doBrowseFolder() {
+        folderInput.click();
+    }
+
+    function onFolderSelected() {
+        selectedFiles = [];
+        var files = folderInput.files;
+        var count = 0;
+        for (var i = 0; i < files.length; i++) {
+            var name = files[i].name.toLowerCase();
+            if (name.endsWith('.docx') || name.endsWith('.doc')) {
+                selectedFiles.push(files[i]);
+                count++;
+            }
+        }
+        if (count > 0) {
+            folderPath.value = '已选择 ' + count + ' 个 Word 文件';
+            fileCount.textContent = '(' + count + '个)';
+            statusEl.textContent = '已选择 ' + count + ' 个文件，点击【调整尺寸】开始处理';
+        } else {
+            folderPath.value = '';
+            fileCount.textContent = '(未找到 .docx 文件)';
+            statusEl.textContent = '未在所选文件夹中找到 Word 文件';
+        }
+    }
+
+    function doDefault() {
+        document.getElementById('inlinePics').checked = true;
+        document.getElementById('shapes').checked = true;
+        document.getElementById('textBoxes').checked = false;
+        // 筛选：默认"限制最小尺寸"
+        var filterRadios = document.getElementsByName('filterType');
+        filterRadios[1].checked = true;
+        // 目标：默认"自动适应页面宽度"
+        var targetRadios = document.getElementsByName('targetSizeType');
+        targetRadios[0].checked = true;
+        var scopeRadios = document.getElementsByName('scope');
+        scopeRadios[0].checked = true;
+
+        document.getElementById('minWidthInput').value = '6';
+        document.getElementById('minHeightInput').value = '4';
+        document.getElementById('targetWidthInput').value = '16';
+        document.getElementById('targetHeightInput').value = '';
+        document.getElementById('marginInput').value = '1';
+        detectedUsableWidthCm = 0;
+        document.getElementById('pageWidthText').textContent = '点击检测当前文档页面宽度和页边距';
+
+        onScopeChange();
+        onFilterTypeChange();
+        onTargetSizeTypeChange();
+        updateCheckboxStyle();
+        statusEl.textContent = '已恢复默认设置';
+    }
+
+    // ===== 获取选中图片的尺寸（填入最小尺寸筛选框） =====
+    function doGetSize() {
+        statusEl.textContent = '正在获取选中图片尺寸...';
+        Word.run(function(context) {
+            var selection = context.document.getSelection();
+            var inlinePics = selection.inlinePictures;
+            var shapes = selection.shapes;
+            inlinePics.load('items');
+            shapes.load('items');
+            return context.sync().then(function() {
+                if (inlinePics.items.length > 0) {
+                    var pic = inlinePics.items[0];
+                    pic.load('width,height');
+                    return context.sync().then(function() {
+                        document.getElementById('minWidthInput').value = (pic.width / CM_TO_POINT).toFixed(2);
+                        document.getElementById('minHeightInput').value = (pic.height / CM_TO_POINT).toFixed(2);
+                        statusEl.textContent = '已获取嵌入式图片尺寸（宽 ' + (pic.width / CM_TO_POINT).toFixed(2) + ' CM，高 ' + (pic.height / CM_TO_POINT).toFixed(2) + ' CM）';
+                    });
+                } else if (shapes.items.length > 0) {
+                    var shape = shapes.items[0];
+                    shape.load('width,height');
+                    return context.sync().then(function() {
+                        document.getElementById('minWidthInput').value = (shape.width / CM_TO_POINT).toFixed(2);
+                        document.getElementById('minHeightInput').value = (shape.height / CM_TO_POINT).toFixed(2);
+                        statusEl.textContent = '已获取图形尺寸（宽 ' + (shape.width / CM_TO_POINT).toFixed(2) + ' CM，高 ' + (shape.height / CM_TO_POINT).toFixed(2) + ' CM）';
+                    });
+                } else {
+                    statusEl.textContent = '未选中图片或图形，请先选中一个对象';
+                }
+            });
+        }).catch(function(error) { statusEl.textContent = '获取失败: ' + error.message; });
+    }
+
+    // ===== 检测页面尺寸（含页边距） =====
+    function doDetectPageWidth() {
+        if (getCheckedValue('scope') !== 'current') {
+            statusEl.textContent = '页面尺寸检测仅支持"当前文档"模式';
+            return;
+        }
+        statusEl.textContent = '正在检测页面尺寸...';
+        Word.run(function(context) {
+            var ooxml = context.document.body.getOoxml();
+            return context.sync().then(function() {
+                var info = parsePageInfo(ooxml.value);
+                detectedUsableWidthCm = info.usableWidthCm;
+                var marginCm = parseFloat(document.getElementById('marginInput').value) || 1;
+                var targetW = Math.max(0, info.usableWidthCm - marginCm);
+                var html = '纸张宽 <span class="detected-page-width">' + info.pageWidthCm.toFixed(2) + '</span> CM';
+                html += '，左边距 <span class="detected-page-width">' + info.leftMarginCm.toFixed(2) + '</span> CM';
+                html += '，右边距 <span class="detected-page-width">' + info.rightMarginCm.toFixed(2) + '</span> CM';
+                html += '<br>可用宽度 = <span class="detected-page-width">' + info.usableWidthCm.toFixed(2) + '</span> CM';
+                html += '，目标宽度 = <span class="detected-page-width">' + targetW.toFixed(2) + '</span> CM';
+                document.getElementById('pageWidthText').innerHTML = html;
+                targetWidthInput.value = targetW.toFixed(2);
+                statusEl.textContent = '可用宽度 ' + info.usableWidthCm.toFixed(2) + ' CM，目标宽度 ' + targetW.toFixed(2) + ' CM';
+            });
+        }).catch(function(error) { statusEl.textContent = '检测失败: ' + error.message; });
+    }
+
+    // 默认 A4 页面参数（twips）
+    var DEFAULT_PAGE_W = 11906;   // 21cm
+    var DEFAULT_MARGIN = 1440;    // 2.54cm
+
+    function parsePageInfo(ooxmlStr) {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(ooxmlStr, 'text/xml');
+        return parsePageInfoFromDoc(doc);
+    }
+
+    function parsePageInfoFromDoc(xmlDoc) {
+        var sectPrs = xmlDoc.getElementsByTagNameNS(W_NS, 'sectPr');
+        if (sectPrs.length === 0) sectPrs = xmlDoc.getElementsByTagName('w:sectPr');
+
+        var pageWTwips = DEFAULT_PAGE_W;
+        var leftMgnTwips = DEFAULT_MARGIN;
+        var rightMgnTwips = DEFAULT_MARGIN;
+
+        if (sectPrs.length > 0) {
+            var pgSzs = sectPrs[0].getElementsByTagNameNS(W_NS, 'pgSz');
+            if (pgSzs.length === 0) pgSzs = sectPrs[0].getElementsByTagName('w:pgSz');
+            if (pgSzs.length > 0) {
+                var wVal = parseInt(pgSzs[0].getAttribute('w:w') || pgSzs[0].getAttribute('w') || '' + DEFAULT_PAGE_W, 10);
+                if (wVal > 0) pageWTwips = wVal;
+            }
+
+            var pgMars = sectPrs[0].getElementsByTagNameNS(W_NS, 'pgMar');
+            if (pgMars.length === 0) pgMars = sectPrs[0].getElementsByTagName('w:pgMar');
+            if (pgMars.length > 0) {
+                var l = parseInt(pgMars[0].getAttribute('w:left') || pgMars[0].getAttribute('left') || '' + DEFAULT_MARGIN, 10);
+                var r = parseInt(pgMars[0].getAttribute('w:right') || pgMars[0].getAttribute('right') || '' + DEFAULT_MARGIN, 10);
+                if (l >= 0) leftMgnTwips = l;
+                if (r >= 0) rightMgnTwips = r;
+            }
+        }
+
+        var pageWCm = pageWTwips / TWIP_PER_CM;
+        var leftMCm = leftMgnTwips / TWIP_PER_CM;
+        var rightMCm = rightMgnTwips / TWIP_PER_CM;
+        var usableWCm = Math.max(0, pageWCm - leftMCm - rightMCm);
+
+        return {
+            pageWidthCm: pageWCm,
+            leftMarginCm: leftMCm,
+            rightMarginCm: rightMCm,
+            usableWidthCm: usableWCm
+        };
+    }
+
+    // ===== 收集选项 =====
+    function getOptions() {
+        var filterType = getCheckedValue('filterType');
+        var targetSizeType = getCheckedValue('targetSizeType');
+        var minW = parseFloat(document.getElementById('minWidthInput').value);
+        var minH = parseFloat(document.getElementById('minHeightInput').value);
+        var manW = parseFloat(document.getElementById('targetWidthInput').value);
+        var manH = parseFloat(document.getElementById('targetHeightInput').value);
+        var margin = parseFloat(document.getElementById('marginInput').value);
+
+        return {
+            scope: getCheckedValue('scope'),
+            filterType: filterType,
+            minWidthCm: isNaN(minW) ? 0 : minW,
+            minHeightCm: isNaN(minH) ? 0 : minH,
+            targetSizeType: targetSizeType,
+            usableWidthCm: detectedUsableWidthCm,
+            manualWidthCm: isNaN(manW) ? 16 : manW,
+            manualHeightCm: isNaN(manH) ? 0 : manH,
+            marginCm: isNaN(margin) ? 1 : margin,
+            includeInline: document.getElementById('inlinePics').checked,
+            includeShapes: document.getElementById('shapes').checked,
+            includeTextBoxes: document.getElementById('textBoxes').checked
+        };
+    }
+
+    // ===== 计算目标尺寸 =====
+    function getTargetWidthCm(opts) {
+        // 直接使用宽输入框的值（自动适应模式已由检测按钮填入）
+        var w = opts.manualWidthCm;
+        if (w <= 0 || isNaN(w)) w = 16;
+        return w;
+    }
+
+    function getTargetHeightCm(opts, origWCm, origHCm) {
+        // 如果指定了高度，使用指定值；否则按原始比例计算
+        var h = opts.manualHeightCm;
+        if (h > 0 && !isNaN(h)) return h;
+        if (origWCm <= 0) return 0;
+        return getTargetWidthCm(opts) * (origHCm / origWCm);
+    }
+
+    // ===== 筛选：图片是否满足最小尺寸条件 =====
+    function passesFilter(widthCm, heightCm, opts) {
+        if (opts.filterType === 'all') return true;
+        return widthCm > opts.minWidthCm && heightCm > opts.minHeightCm;
+    }
+
+    // ====================================================================
+    // 当前文档 —— 通过 Word JS API 调整尺寸
+    // ====================================================================
+    function doResizeCurrent(opts) {
+        var targetWCm = getTargetWidthCm(opts);
+        var targetWPt = targetWCm * CM_TO_POINT;
+        var hasManualH = (opts.manualHeightCm > 0 && !isNaN(opts.manualHeightCm));
+        var targetHPt = hasManualH ? opts.manualHeightCm * CM_TO_POINT : 0;
+
+        Word.run(function(context) {
+            var body = context.document.body;
+            var report = { inline: 0, shapes: 0, textBoxes: 0, skipped: 0 };
+
+            function processInline() {
+                var pics = body.inlinePictures;
+                pics.load('items');
+                return context.sync().then(function() {
+                    var items = pics.items;
+                    var resizeList = [];
+                    // 先加载所有尺寸
+                    for (var i = 0; i < items.length; i++) {
+                        items[i].load('width,height');
+                        resizeList.push(items[i]);
+                    }
+                    return context.sync().then(function() {
+                        for (var i = 0; i < resizeList.length; i++) {
+                            var pic = resizeList[i];
+                            var wCm = pic.width / CM_TO_POINT;
+                            var hCm = pic.height / CM_TO_POINT;
+                            if (passesFilter(wCm, hCm, opts)) {
+                                pic.width = targetWPt;
+                                pic.height = hasManualH ? targetHPt : (targetWPt * (pic.height / pic.width));
+                                report.inline++;
+                            } else {
+                                report.skipped++;
+                            }
+                        }
+                        return context.sync();
+                    });
+                });
+            }
+
+            function processShapes() {
+                var shps = body.shapes;
+                shps.load('items');
+                return context.sync().then(function() {
+                    var items = shps.items;
+                    var resizeList = [];
+                    for (var i = 0; i < items.length; i++) {
+                        items[i].load('width,height,type');
+                        resizeList.push(items[i]);
+                    }
+                    return context.sync().then(function() {
+                        for (var i = 0; i < resizeList.length; i++) {
+                            var s = resizeList[i];
+                            var isTB = (s.type === 'TextBox' || s.type === 'TextFrame');
+                            var shouldProcess = false;
+                            if (isTB && opts.includeTextBoxes) shouldProcess = true;
+                            if (!isTB && opts.includeShapes) shouldProcess = true;
+
+                            if (shouldProcess) {
+                                var wCm = s.width / CM_TO_POINT;
+                                var hCm = s.height / CM_TO_POINT;
+                                if (passesFilter(wCm, hCm, opts)) {
+                                    s.width = targetWPt;
+                                    s.height = hasManualH ? targetHPt : (targetWPt * (s.height / s.width));
+                                    if (isTB) report.textBoxes++; else report.shapes++;
+                                } else {
+                                    report.skipped++;
+                                }
+                            }
+                        }
+                        return context.sync();
+                    });
+                });
+            }
+
+            var chain = context.sync().then(function(){});
+            if (opts.includeInline) chain = chain.then(processInline);
+            if (opts.includeShapes || opts.includeTextBoxes) chain = chain.then(processShapes);
+            return chain.then(function() {
+                var t = report.inline + report.shapes + report.textBoxes;
+                var msg = '调整完成：共 ' + t + ' 个（嵌入式 ' + report.inline + '，图形 ' + report.shapes + '，文本框 ' + report.textBoxes + '）';
+                if (report.skipped > 0) msg += '，跳过 ' + report.skipped + ' 个';
+                msg += '，目标宽 ' + targetWCm.toFixed(2) + ' CM';
+                if (hasManualH) msg += ' x ' + opts.manualHeightCm.toFixed(2) + ' CM';
+                else msg += '（高度按比例）';
+                statusEl.textContent = msg;
+            });
+        }).catch(function(error) { statusEl.textContent = '调整失败: ' + error.message; });
+    }
+
+    // ====================================================================
+    // 多个文档 —— 通过 JSZip 解析 docx XML 并修改尺寸
+    // ====================================================================
+    function doResizeMultiple(opts) {
+        if (selectedFiles.length === 0) {
+            statusEl.textContent = '请先选择文件夹';
+            return;
+        }
+        if (!opts.includeInline && !opts.includeShapes && !opts.includeTextBoxes) {
+            statusEl.textContent = '请至少选择一种要调整的类型';
+            return;
+        }
+        if (typeof JSZip === 'undefined') {
+            statusEl.textContent = 'JSZip 未加载，请刷新页面重试';
+            return;
+        }
+
+        statusEl.textContent = '正在处理 ' + selectedFiles.length + ' 个文件...';
+        showProgress(0);
+        statusEl.style.color = '#2b579a';
+
+        var total = selectedFiles.length;
+        var processed = [];
+        var idx = 0;
+
+        function processNext() {
+            if (idx >= total) {
+                finishMultiple(processed);
+                return;
+            }
+            var file = selectedFiles[idx];
+            statusEl.textContent = '正在处理 (' + (idx + 1) + '/' + total + '): ' + file.webkitRelativePath;
+            showProgress(Math.round((idx / total) * 100));
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                processOneDocx(e.target.result, file.name, opts).then(function(result) {
+                    processed.push({ name: file.name, data: result.blob, changed: result.count > 0, count: result.count });
+                    idx++;
+                    setTimeout(processNext, 50);
+                }).catch(function(err) {
+                    processed.push({ name: file.name, data: null, changed: false, error: err.message || err });
+                    idx++;
+                    setTimeout(processNext, 50);
+                });
+            };
+            reader.onerror = function() {
+                processed.push({ name: file.name, data: null, changed: false, error: '读取失败' });
+                idx++;
+                setTimeout(processNext, 50);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        processNext();
+    }
+
+    function processOneDocx(arrayBuffer, fileName, opts) {
+        return JSZip.loadAsync(arrayBuffer).then(function(zip) {
+            var docPath = 'word/document.xml';
+            var docFile = zip.file(docPath);
+            if (!docFile) return Promise.resolve({ blob: arrayBuffer, count: 0 });
+
+            return docFile.async('text').then(function(xmlStr) {
+                var parser = new DOMParser();
+                var xmlDoc = parser.parseFromString(xmlStr, 'text/xml');
+                var resizeCount = 0;
+
+                // 使用统一的宽高计算（与当前文档模式一致）
+                var targetWCm = getTargetWidthCm(opts);
+                var targetWEmu = targetWCm * EMU_PER_CM;
+                var hasManualH = (opts.manualHeightCm > 0 && !isNaN(opts.manualHeightCm));
+                var targetHEmu = hasManualH ? opts.manualHeightCm * EMU_PER_CM : 0;
+
+                // 查找所有 w:drawing 元素
+                var drawings = xmlDoc.getElementsByTagNameNS(W_NS, 'drawing');
+                if (drawings.length === 0) drawings = xmlDoc.getElementsByTagName('w:drawing');
+
+                for (var d = 0; d < drawings.length; d++) {
+                    var dw = drawings[d];
+
+                    // 检查是否包含图片（pic:pic）
+                    var pics = dw.getElementsByTagNameNS(PIC_NS, 'pic');
+                    if (pics.length === 0) pics = dw.getElementsByTagName('pic:pic');
+                    if (pics.length === 0) continue; // 不是图片，跳过
+
+                    // 获取 wp:inline 或 wp:anchor
+                    var container = null;
+                    var inlines = dw.getElementsByTagNameNS(WP_NS, 'inline');
+                    if (inlines.length === 0) inlines = dw.getElementsByTagName('wp:inline');
+                    if (inlines.length > 0) {
+                        container = inlines[0];
+                    } else {
+                        var anchors = dw.getElementsByTagNameNS(WP_NS, 'anchor');
+                        if (anchors.length === 0) anchors = dw.getElementsByTagName('wp:anchor');
+                        if (anchors.length > 0) container = anchors[0];
+                    }
+                    if (!container) continue;
+
+                    // 读取 wp:extent（当前尺寸，单位 EMU）
+                    var extents = container.getElementsByTagNameNS(WP_NS, 'extent');
+                    if (extents.length === 0) extents = container.getElementsByTagName('wp:extent');
+                    if (extents.length === 0) continue;
+
+                    var cxEmu = parseInt(extents[0].getAttribute('cx') || '0', 10);
+                    var cyEmu = parseInt(extents[0].getAttribute('cy') || '0', 10);
+                    if (cxEmu <= 0 || cyEmu <= 0) continue;
+
+                    var wCm = cxEmu / EMU_PER_CM;
+                    var hCm = cyEmu / EMU_PER_CM;
+
+                    // 检查筛选条件
+                    if (!passesFilter(wCm, hCm, opts)) continue;
+
+                    // 计算新尺寸
+                    var newCxEmu = Math.round(targetWEmu);
+                    var newCyEmu = hasManualH ? Math.round(targetHEmu) : Math.round(targetWEmu * (cyEmu / cxEmu));
+
+                    // 更新 wp:extent
+                    extents[0].setAttribute('cx', '' + newCxEmu);
+                    extents[0].setAttribute('cy', '' + newCyEmu);
+
+                    // 更新 a:ext inside a:xfrm（pic:spPr 内）
+                    var aExts = container.getElementsByTagNameNS(A_NS, 'ext');
+                    if (aExts.length === 0) aExts = container.getElementsByTagName('a:ext');
+                    for (var ae = 0; ae < aExts.length; ae++) {
+                        var parent = aExts[ae].parentNode;
+                        var isXfrm = false;
+                        if (parent) {
+                            var pn = parent.localName || parent.nodeName || '';
+                            if (pn === 'xfrm' || pn === 'a:xfrm') isXfrm = true;
+                        }
+                        if (isXfrm) {
+                            aExts[ae].setAttribute('cx', '' + newCxEmu);
+                            aExts[ae].setAttribute('cy', '' + newCyEmu);
+                        }
+                    }
+
+                    // 删除 wp:effectExtent（让 Word 重新计算）
+                    var effExtents = container.getElementsByTagNameNS(WP_NS, 'effectExtent');
+                    if (effExtents.length === 0) effExtents = container.getElementsByTagName('wp:effectExtent');
+                    for (var ee = effExtents.length - 1; ee >= 0; ee--) {
+                        effExtents[ee].parentNode.removeChild(effExtents[ee]);
+                    }
+
+                    resizeCount++;
+                }
+
+                // 处理 w:pict 中的 VML 图片
+                var picts = xmlDoc.getElementsByTagNameNS(W_NS, 'pict');
+                if (picts.length === 0) picts = xmlDoc.getElementsByTagName('w:pict');
+                for (var p = 0; p < picts.length; p++) {
+                    var vShapes = picts[p].getElementsByTagNameNS('urn:schemas-microsoft-com:vml', 'shape');
+                    if (vShapes.length === 0) vShapes = picts[p].getElementsByTagName('v:shape');
+                    for (var vs = 0; vs < vShapes.length; vs++) {
+                        var style = vShapes[vs].getAttribute('style') || '';
+                        // style 格式：width:300pt;height:200pt
+                        var wMatch = style.match(/width:([\d.]+)pt/i);
+                        var hMatch = style.match(/height:([\d.]+)pt/i);
+                        if (wMatch && hMatch) {
+                            var vwPt = parseFloat(wMatch[1]);
+                            var vhPt = parseFloat(hMatch[1]);
+                            var vwCm = vwPt / CM_TO_POINT;
+                            var vhCm = vhPt / CM_TO_POINT;
+                            if (passesFilter(vwCm, vhCm, opts)) {
+                                var newVwPt = targetWCm * CM_TO_POINT;
+                                var newVhPt = hasManualH ? (opts.manualHeightCm * CM_TO_POINT) : (newVwPt * (vhPt / vwPt));
+                                var newStyle = style
+                                    .replace(/width:[\d.]+pt/i, 'width:' + newVwPt.toFixed(1) + 'pt')
+                                    .replace(/height:[\d.]+pt/i, 'height:' + newVhPt.toFixed(1) + 'pt');
+                                vShapes[vs].setAttribute('style', newStyle);
+                                resizeCount++;
+                            }
+                        }
+                    }
+                }
+
+                if (resizeCount === 0) return { blob: arrayBuffer, count: 0 };
+
+                var serializer = new XMLSerializer();
+                var newXml = serializer.serializeToString(xmlDoc);
+                zip.file(docPath, newXml);
+
+                return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } }).then(function(newData) {
+                    return { blob: newData, count: resizeCount };
+                });
+            });
+        });
+    }
+
+    function finishMultiple(processed) {
+        showProgress(100);
+        var changed = [];
+        var noChange = [];
+        var errors = [];
+        for (var i = 0; i < processed.length; i++) {
+            if (processed[i].changed && processed[i].data) changed.push(processed[i]);
+            else if (processed[i].error) errors.push(processed[i].name);
+            else noChange.push(processed[i].name);
+        }
+
+        if (changed.length === 0) {
+            var msg = '处理完成，未找到需要调整的图片。共处理 ' + processed.length + ' 个文件。';
+            if (errors.length > 0) msg += ' (' + errors.length + ' 个失败)';
+            statusEl.textContent = msg;
+            hideProgress();
+            return;
+        }
+
+        statusEl.textContent = '正在打包下载...';
+
+        if (changed.length === 1) {
+            var blob = new Blob([changed[0].data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            triggerDownload(blob, changed[0].name);
+            var m = '处理完成：' + changed[0].name + ' 已下载（调整了 ' + changed[0].count + ' 张图片）';
+            if (errors.length > 0) m += '，' + errors.length + ' 个失败';
+            if (noChange.length > 0) m += '，' + noChange.length + ' 个无变化';
+            statusEl.textContent = m;
+        } else {
+            var outZip = new JSZip();
+            var totalResized = 0;
+            for (var i = 0; i < changed.length; i++) {
+                outZip.file(changed[i].name, changed[i].data);
+                totalResized += changed[i].count;
+            }
+            outZip.generateAsync({ type: 'blob', compression: 'DEFLATE' }).then(function(content) {
+                triggerDownload(content, '批量调整图片尺寸结果.zip');
+                var m = '处理完成：' + changed.length + ' 个文件已打包下载（共调整 ' + totalResized + ' 张图片）';
+                if (errors.length > 0) m += '，' + errors.length + ' 个失败';
+                if (noChange.length > 0) m += '，' + noChange.length + ' 个无变化';
+                statusEl.textContent = m;
+            });
+        }
+        hideProgress();
+    }
+
+    function triggerDownload(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    function showProgress(pct) {
+        progressBar.style.display = 'block';
+        progressFill.style.width = pct + '%';
+    }
+
+    function hideProgress() {
+        setTimeout(function() {
+            progressBar.style.display = 'none';
+            progressFill.style.width = '0%';
+        }, 2000);
+    }
+
+    // ===== 主入口：调整尺寸 =====
+    function doResize() {
+        var opts = getOptions();
+
+        // 验证
+        if (opts.scope === 'current' && detectedUsableWidthCm === 0 && opts.targetSizeType === 'page') {
+            statusEl.textContent = '请先点击【检测页面尺寸】获取当前文档可用宽度';
+            return;
+        }
+
+        if (!opts.includeInline && !opts.includeShapes && !opts.includeTextBoxes) {
+            statusEl.textContent = '请至少选择一种要调整的图片类型';
+            return;
+        }
+
+        var targetW = getTargetWidthCm(opts);
+        if (targetW <= 0 || isNaN(targetW)) {
+            statusEl.textContent = '目标宽度不合法，请检查设置';
+            return;
+        }
+        var hasManualH = (opts.manualHeightCm > 0 && !isNaN(opts.manualHeightCm));
+        if (hasManualH && opts.manualHeightCm <= 0) {
+            statusEl.textContent = '目标高度不合法，请检查设置';
+            return;
+        }
+
+        if (opts.filterType === 'minsize') {
+            if (isNaN(opts.minWidthCm) || isNaN(opts.minHeightCm)) {
+                statusEl.textContent = '最小尺寸参数填写不正确';
+                return;
+            }
+        }
+
+        statusEl.textContent = '正在调整图片尺寸...';
+        statusEl.style.color = '#2b579a';
+
+        if (opts.scope === 'multiple') {
+            doResizeMultiple(opts);
+        } else {
+            doResizeCurrent(opts);
+        }
+    }
+
+    // ===== Office 初始化 =====
+    Office.onReady(function(info) {
+        initUI();
+        if (info.host !== Office.HostType.Word) {
+            statusEl.textContent = '请在 Word 中使用此加载项';
+        }
+    });
+    </script>
+</body>
+</html>

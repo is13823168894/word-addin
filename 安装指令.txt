@@ -1,0 +1,76 @@
+
+codebuddy --model glm-5v-turbo
+/resume
+
+office-addin-debugging start manifest-regex.xml desktop
+office-addin-debugging stop manifest-regex.xml desktop
+
+
+
+ office-addin-debugging start manifest-vocab.xml desktop
+office-addin-debugging start manifest-tomarkdown.xml desktop
+
+
+office-addin-debugging start manifest-picture.xml desktop
+office-addin-debugging stop manifest-picture.xml desktop
+
+
+office-addin-debugging start manifest-batch.xml desktop
+office-addin-debugging stop manifest-batch.xml desktop
+
+office-addin-debugging start manifest-picture-del.xml desktop
+office-addin-debugging stop manifest-picture-del.xml desktop
+
+office-addin-debugging start manifest-picture-size.xml desktop
+office-addin-debugging stop manifest-picture-size.xml desktop
+
+office-addin-debugging start manifest-picture-add.xml desktop
+office-addin-debugging stop manifest-picture-add.xml desktop
+
+office-addin-debugging start manifest-table-firstrow.xml desktop
+office-addin-debugging stop manifest-table-firstrow.xml desktop
+
+office-addin-debugging start manifest-compare.xml desktop
+office-addin-debugging stop manifest-compare.xml desktop
+
+office-addin-debugging start manifest-navpanel.xml desktop
+office-addin-debugging stop manifest-navpanel.xml desktop
+
+office-addin-debugging start manifest-excel.xml desktop
+office-addin-debugging stop manifest-excel.xml desktop
+luckysheet
+
+
+office-addin-debugging start manifest-luckysheet.xml desktop
+office-addin-debugging stop manifest-luckysheet.xml desktop
+
+office-addin-debugging start manifest-univer.xml desktop
+office-addin-debugging stop manifest-univer.xml desktop
+
+
+office-addin-debugging start manifest.xml desktop
+office-addin-debugging stop manifest.xml desktop
+
+office-addin-debugging start manifest-copy.xml desktop
+office-addin-debugging stop manifest-copy.xml desktop
+
+office-addin-debugging start manifest-AIDitor.xml desktop
+office-addin-debugging stop manifest-AIDitor.xml desktop
+
+
+office-addin-debugging start manifest-AIDitorDoubao.xml desktop
+office-addin-debugging stop manifest-AIDitorDoubao.xml desktop
+
+
+office-addin-debugging start manifest-AIDitorDoubao.xml desktop
+office-addin-debugging stop manifest-AIDitorDoubao.xml desktop
+
+revisedcompare
+
+
+office-addin-debugging start manifest-revisedcompare.xml desktop
+office-addin-debugging stop manifest-revisedcompare.xml desktop
+
+
+
+

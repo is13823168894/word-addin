@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>表格工作台 (Univer)</title>
+
+<!-- 外部依赖：React、ReactDOM、RxJS、ECharts、SheetJS（本地 dist） -->
+<script src="dist/react.production.min.js"></script>
+<script src="dist/react-dom.production.min.js"></script>
+<script src="dist/rxjs.umd.min.js"></script>
+<script src="dist/echarts.min.js"></script>
+<script src="dist/xlsx.full.min.js"></script>
+
+<!-- Univer 预设包（电子表格核心功能，本地 dist） -->
+<!-- 注意：univer-preset-sheets-advanced.umd.js 内部依赖 Univer Pro 的 AddCommentMutation，在非 Pro 版本会加载报错，已移除 -->
+<script src="dist/univer-presets.umd.js"></script>
+<script src="dist/univer-preset-sheets-core.umd.js"></script>
+<script src="dist/univer-preset-sheets-drawing.umd.js"></script>
+<script src="dist/univer-locale-zh-CN.js"></script>
+<script src="dist/univer-drawing-locale-zh-CN.js"></script>
+<link rel="stylesheet" href="dist/univer.css">
+<link rel="stylesheet" href="dist/univer-drawing.css">
+
+<style>
+html,body{height:100%;margin:0;padding:0;overflow:hidden;}
+body{display:flex;flex-direction:column;font-family:"Microsoft YaHei",sans-serif;font-size:12px;color:#333;background:#fff;}
+.toolbar{padding:6px 8px;border-bottom:1px solid #ddd;background:#f3f3f3;display:flex;gap:5px;flex-wrap:wrap;align-items:center;flex-shrink:0;}
+.toolbar button{padding:5px 10px;font-size:12px;cursor:pointer;border:1px solid #bbb;border-radius:3px;background:#fff;color:#333;white-space:nowrap;line-height:1.2;}
+.toolbar button:hover{background:#e8e8e8;}
+.toolbar button:disabled{opacity:.5;cursor:not-allowed;}
+.toolbar button.accent{background:#2b579a;color:#fff;border-color:#2b579a;}
+.toolbar button.accent:hover{background:#1e3f6f;}
+.toolbar .sep{width:1px;background:#ccc;align-self:stretch;margin:0 4px;}
+.toolbar .hint{font-size:11px;color:#777;margin-left:6px;}
+.toolbar .toggle{font-size:12px;color:#333;display:inline-flex;align-items:center;gap:3px;white-space:nowrap;user-select:none;}
+.toolbar .toggle input{margin:0;}
+#univer-container{flex:1 1 auto;min-height:300px;position:relative;overflow:hidden;background:#fff;}
+.fallback{padding:30px 20px;text-align:center;color:#888;font-size:13px;line-height:1.8;}
+.fallback code{background:#f0f0f0;padding:1px 5px;border-radius:2px;font-family:Consolas,monospace;color:#c7254e;}
+.status{padding:5px 10px;border-top:1px solid #ddd;background:#f7f7f7;font-size:11px;color:#555;flex-shrink:0;min-height:22px;line-height:1.4;}
+.status.ok{color:#0a7a2a;}
+.status.err{color:#c0392b;}
+.status.working{color:#2b579a;}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="accent" id="btnImport" onclick="importWordTable()" title="读取选区所有表格，从C6开始写入，每表间隔6行">Word → 表</button>
+  <button id="btnImportCursor" onclick="importCursorTable()" title="光标放入单元格即可自动识别并导入，无需全选；导入后自动全选下一个表格">选中 → 表</button>
+  <button id="btnNext" onclick="importNextTable()" title="导入下一个 Word 表格">下一个 ›</button>
+  <button id="btnselectNext" onclick="selectNextTable()" title="光标跳到下一个 Word 表格首格（不全选）">跳下一个 ›</button>
+  <button id="btnSelectNextFull" onclick="selectNextTableFull()" title="全选下一个 Word 表格">选下一个 ›</button>
+  <label class="toggle"><input type="checkbox" id="chkCursorPaste" onchange="toggleCursorPaste(this.checked)"> 从光标处粘贴</label>
+  <button class="accent" id="btnExport" onclick="exportToWord()" title="把工作表作为 Word 表格插入到光标位置">表 → Word</button>
+  <span class="sep"></span>
+  <button id="btnSave" onclick="saveDocument()" title="生成 XLSX → 保存到 C001 WORD核对目录（本地文件用原名，未保存用时间戳）">💾 保存</button>
+  <button id="btnExpand" onclick="expandDialog()" title="打开独立大窗口浮窗（Office Dialog API），让表格浮于 Word 之上便于大批量运算复核">⛶ 放大</button>
+  <span class="sep"></span>
+  <button id="btnSample" onclick="loadSample()" title="加载示例数据，含 SUM / IF 公式">示例数据</button>
+  <button id="btnClearAll" onclick="clearAllSheets()" title="清除所有工作表数据并删除文档保存（下次打开为空白）">清除全部</button>
+  <span class="hint">编辑即自动保存到当前 Word 文档；下次打开此 .docx 时自动恢复。编辑/公式/图表/格式 请用下方 Univer 菜单</span>
+</div>
+
+<div id="univer-container">
+  <div id="univer-app" style="margin:0;padding:0;position:absolute;width:100%;height:100%;left:0;top:0;"></div>
+  <div class="fallback" id="loadingHint">正在加载 Univer 电子表格组件…<br>如果长时间未加载，请检查网络连接</div>
+</div>
+
+<div class="status" id="status">初始化中…</div>
+
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script>
+/* =====================================================
+   表格工作台 (Univer 方案) - Word 加载项
+   电子表格组件: Univer (Apache-2.0, Canvas 渲染, 类 Excel)
+   GitHub: https://github.com/dream-num/univer
+   ===================================================== */
+
+var isReady = false;
+var _curTableIdx = -1;
+var _totalTables = 0;
+var univerAPI = null;
+var _clearBeforePaste = true;   // true=导入先清空工作表再写入；false=从光标所在单元格开始粘贴(不清空)
+
+function setStatus(msg, type) {
+  var el = document.getElementById('status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'status' + (type ? (' ' + type) : '');
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function setReady(ready) {
+  isReady = ready;
+  var ids = ['btnImport','btnImportCursor','btnNext','btnselectNext','btnSelectNextFull','btnExport','btnSave','btnExpand','btnSample','btnClearAll','chkCursorPaste'];
+  for (var i = 0; i < ids.length; i++) {
+    var b = document.getElementById(ids[i]);
+    if (b) b.disabled = !ready;
+  }
+}
+
+/* ============ 从光标处粘贴：开关 ============ */
+function toggleCursorPaste(checked) {
+  _clearBeforePaste = !checked;   // 勾选=从光标处粘贴(不清空)；不勾选=导入即清空替换
+  setStatus(checked ? '已开启：导入从光标所在单元格开始粘贴（不清空）' : '已关闭：导入将先清空工作表再写入', 'ok');
+}
+
+/* ============ 整个工作簿 → JSON（所有 sheet） ============ */
+function getWorkbookData() {
+  try {
+    var wb = univerAPI.getActiveWorkbook();
+    if (!wb) return null;
+    var sheetCount = 0;
+    try { sheetCount = wb.getSheets().length; } catch (e) { sheetCount = 1; }
+    if (sheetCount === 0) return null;
+
+    var sheets = [];
+    for (var si = 0; si < sheetCount; si++) {
+      var sheet = null;
+      try { sheet = wb.getSheetByIndex(si); } catch (e2) { continue; }
+      if (!sheet) continue;
+      var sheetName = '';
+      try { sheetName = sheet.getSheetName(); } catch (e3) { sheetName = 'Sheet' + (si + 1); }
+
+      // 先用 API 获取实际数据范围（比遍历全表快得多）
+      var lastDataRow = -1, lastDataCol = -1;
+
+      // 尝试用 Univer API 直接获取已使用区域
+      try {
+        var usedRange = sheet.getUsedRange();
+        if (usedRange) {
+          try { lastDataRow = usedRange.getEndRow(); } catch (e4) {}
+          try { lastDataCol = usedRange.getEndColumn(); } catch (e5) {}
+          // 如果 API 返回有效值，直接使用
+          if (lastDataRow >= 0 && lastDataCol >= 0) {
+            // 确认确实有数据
+            var testVal = null;
+            try { testVal = sheet.getRange(lastDataRow, lastDataCol).getValue(); } catch (e5b) {}
+            if (testVal === null || testVal === undefined || testVal === '') {
+              lastDataRow = -1;
+              lastDataCol = -1;
+            }
+          }
+        }
+      } catch (e4b) {
+        // getUsedRange 不可用，回退到遍历
+      }
+
+      // 回退：遍历（限制在合理范围内，避免 1000×26 全遍历）
+      if (lastDataRow < 0) {
+        var maxR = 0, maxC = 0;
+        try { maxC = sheet.getMaxColumns(); } catch (e6) { maxC = 26; }
+        try { maxR = sheet.getMaxRows(); } catch (e7) { maxR = 200; }
+        // 限制最大遍历范围
+        if (maxR > 500) maxR = 500;
+        if (maxC > 100) maxC = 100;
+
+        for (var r = 0; r < maxR && lastDataRow < 0; r++) {
+          for (var c = 0; c < maxC; c++) {
+            var val = null;
+            try { val = sheet.getRange(r, c).getValue(); } catch (e8) {}
+            if (val !== null && val !== undefined && val !== '') {
+              if (r > lastDataRow) lastDataRow = r;
+              if (c > lastDataCol) lastDataCol = c;
+            }
+          }
+        }
+
+        // 如果只找到1列有数据，再多扫描一点
+        if (lastDataCol >= 0 && lastDataRow >= 0 && lastDataCol < maxC - 1) {
+          for (var r2 = 0; r2 <= lastDataRow; r2++) {
+            for (var c2 = lastDataCol + 1; c2 < maxC; c2++) {
+              var val2 = null;
+              try { val2 = sheet.getRange(r2, c2).getValue(); } catch (e9) {}
+              if (val2 !== null && val2 !== undefined && val2 !== '') {
+                if (c2 > lastDataCol) lastDataCol = c2;
+              }
+            }
+          }
+        }
+      }
+
+      if (lastDataRow < 0) {
+        sheets.push({ name: sheetName, rows: [], maxR: -1, maxC: -1 });
+        continue;
+      }
+
+      var rows2d = [];
+      for (var r3 = 0; r3 <= lastDataRow; r3++) {
+        var arr = [];
+        for (var c3 = 0; c3 <= lastDataCol; c3++) {
+          var val3 = null;
+          try { val3 = sheet.getRange(r3, c3).getValue(); } catch (e10) {}
+          arr.push(val3 === null || val3 === undefined ? '' : String(val3));
+        }
+        rows2d.push(arr);
+      }
+      sheets.push({ name: sheetName, rows: rows2d, maxR: lastDataRow, maxC: lastDataCol });
+    }
+    return { sheets: sheets };
+  } catch (e) {
+    setStatus('读取工作簿数据失败：' + (e.message || e), 'err');
+    return null;
+  }
+}
+
+/* ============ JSON → 重建整个工作簿 ============ */
+function loadWorkbookData(wbData) {
+  if (!isReady || !univerAPI || !wbData || !wbData.sheets) return;
+  try {
+    var wb = univerAPI.getActiveWorkbook();
+    if (!wb) return;
+
+    // 清空现有所有 sheet
+    var sheetCount = 0;
+    try { sheetCount = wb.getSheets().length; } catch (e) {}
+    for (var si = sheetCount - 1; si >= 0; si--) {
+      try {
+        var s = wb.getSheetByIndex(si);
+        if (s) {
+          // 保留第一张 sheet，删除其余，再在第一张上重建
+          if (si > 0) wb.deleteSheet(s);
+        }
+      } catch (e2) {}
+    }
+
+    var sheets = wbData.sheets;
+    if (sheets.length === 0) return;
+
+    // 确保至少有一个 sheet
+    var firstSheet = null;
+    try { firstSheet = wb.getSheetByIndex(0); } catch (e3) {}
+    if (!firstSheet) {
+      try { wb.createSheet(sheets[0].name || 'Sheet1'); } catch (e4) {}
+      try { firstSheet = wb.getSheetByIndex(0); } catch (e5) {}
+    }
+    if (!firstSheet) return;
+
+    // 清空第一张
+    var oldR = 0, oldC = 0;
+    try { oldR = firstSheet.getMaxRows(); } catch (e6) {}
+    try { oldC = firstSheet.getMaxColumns(); } catch (e7) {}
+    for (var i = 0; i < oldR; i++) {
+      for (var j = 0; j < oldC; j++) {
+        try {
+          var cv = firstSheet.getRange(i, j).getValue();
+          if (cv !== null && cv !== undefined && cv !== '') firstSheet.getRange(i, j).setValue('');
+        } catch (e8) {}
+      }
+    }
+    try { firstSheet.setSheetName(sheets[0].name || 'Sheet1'); } catch (e9) {}
+
+    // 写入第一张数据
+    _fillSheetData(firstSheet, sheets[0]);
+
+    // 创建其余 sheet 并写入
+    for (var si2 = 1; si2 < sheets.length; si2++) {
+      try {
+        var newSheet = wb.createSheet(sheets[si2].name || ('Sheet' + (si2 + 1)));
+        _fillSheetData(newSheet, sheets[si2]);
+      } catch (e10) {}
+    }
+
+    // 激活第一张有数据的 sheet
+    try { wb.setActiveSheet(firstSheet); } catch (e11) {}
+  } catch (e) {
+    setStatus('恢复工作簿数据失败：' + (e.message || e), 'err');
+  }
+}
+
+function _fillSheetData(sheet, sheetData) {
+  if (!sheet || !sheetData || !sheetData.rows) return;
+  var rows = sheetData.rows;
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i]) continue;
+    for (var j = 0; j < rows[i].length; j++) {
+      var cell = rows[i][j];
+      if (cell === null || cell === undefined || cell === '') continue;
+      var v = (typeof cell === 'object' && cell.v !== undefined) ? cell.v : cell;
+      if (v === '' || v === null || v === undefined) continue;
+      try { sheet.getRange(i, j).setValue(v); } catch (e) {}
+    }
+  }
+}
+
+function loadDataIntoActiveSheet(data2d) {
+  if (!isReady || !univerAPI) return;
+  try {
+    var wb = univerAPI.getActiveWorkbook();
+    if (!wb) return;
+    var sheet = wb.getActiveSheet();
+    if (!sheet) return;
+
+    if (_clearBeforePaste) {
+      // 传统行为：先清空活动 sheet 再写入（从 A1 开始）
+      var oldR = 0, oldC = 0;
+      try { oldR = sheet.getMaxRows(); } catch (e) {}
+      try { oldC = sheet.getMaxColumns(); } catch (e) {}
+      for (var i = 0; i < oldR; i++) {
+        for (var j = 0; j < oldC; j++) {
+          try {
+            var cv = sheet.getRange(i, j).getValue();
+            if (cv !== null && cv !== undefined && cv !== '') sheet.getRange(i, j).setValue('');
+          } catch (e2) {}
+        }
+      }
+      _fillSheetData(sheet, { rows: data2d });
+    } else {
+      // 从光标所在单元格开始粘贴（不清空已有内容）
+      var startR = 0, startC = 0;
+      try {
+        var ar = sheet.getActiveRange();
+        if (ar) {
+          try { startR = ar.getRow(); } catch (e3) {}
+          try { startC = ar.getColumn(); } catch (e4) {}
+        }
+      } catch (e5) { startR = 0; startC = 0; }
+      // 偏移写入：以光标单元格为左上角
+      for (var r = 0; r < data2d.length; r++) {
+        if (!data2d[r]) continue;
+        for (var c = 0; c < data2d[r].length; c++) {
+          var cell = data2d[r][c];
+          if (cell === null || cell === undefined || cell === '') continue;
+          try { sheet.getRange(r + startR, c + startC).setValue(cell); } catch (e6) {}
+        }
+      }
+    }
+  } catch (e) {
+    setStatus('写入数据失败：' + (e.message || e), 'err');
+  }
+}
+
+/* ============ 持久化：文档 Settings（与 Word 文档绑定，每个 .docx 独立保存） ============ */
+function saveToDocument() {
+  if (!isReady || !univerAPI) return;
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document || !Office.context.document.settings) return;
+  try {
+    var wbData = getWorkbookData();
+    if (!wbData || !wbData.sheets || wbData.sheets.length === 0) return;
+    // 计算总行列数用于状态栏显示
+    var totalRows = 0, totalCols = 0, totalSheets = 0;
+    for (var si = 0; si < wbData.sheets.length; si++) {
+      var s = wbData.sheets[si];
+      if (s.maxR >= 0) { totalSheets++; totalRows = Math.max(totalRows, s.maxR + 1); totalCols = Math.max(totalCols, s.maxC + 1); }
+    }
+    if (totalSheets === 0) return;
+    var json = JSON.stringify(wbData);
+    Office.context.document.settings.set('univerData', json);
+    try { Office.context.document.settings.set('Office.AutoShowTaskpaneWithDocument', true); } catch (e2) {}
+    Office.context.document.settings.saveAsync(function(asyncResult) {
+      if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
+        _lastSavedAt = new Date();
+        var cur = document.getElementById('status');
+        if (cur && cur.className.indexOf('working') < 0) {
+          cur.textContent = '已自动保存（' + _lastSavedAt.toLocaleTimeString() + '）：'
+            + totalSheets + ' 个工作表，最大 ' + totalRows + ' 行 × ' + totalCols + ' 列 — 下次打开此 Word 文档将自动恢复';
+          cur.className = 'status ok';
+        }
+      }
+    });
+  } catch (e) {}
+}
+
+function loadFromDocument() {
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document || !Office.context.document.settings) return null;
+  try {
+    var json = Office.context.document.settings.get('univerData');
+    if (!json) return null;
+    var data = JSON.parse(json);
+    // 新格式: { sheets: [...] }
+    if (data && data.sheets) {
+      var hasContent = false;
+      for (var i = 0; i < data.sheets.length; i++) {
+        var s = data.sheets[i];
+        if (s && s.rows && s.rows.length > 0) { hasContent = true; break; }
+      }
+      return hasContent ? data : null;
+    }
+    // 兼容旧格式: 直接是二维数组（单 sheet）
+    if (data && data.length > 0 && Array.isArray(data[0])) {
+      var hasContent2 = false;
+      for (var i2 = 0; i2 < data.length; i2++) {
+        for (var j = 0; j < data[i2].length; j++) {
+          if (data[i2][j] !== null && data[i2][j] !== undefined && data[i2][j] !== '') { hasContent2 = true; break; }
+        }
+        if (hasContent2) break;
+      }
+      if (hasContent2) {
+        return { sheets: [{ name: 'Sheet1', rows: data, maxR: data.length - 1, maxC: (data[0] ? data[0].length - 1 : -1) }] };
+      }
+    }
+    return null;
+  } catch (e) { return null; }
+}
+
+function clearAllSheets() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  try {
+    var wb = univerAPI.getActiveWorkbook();
+    if (wb) {
+      var sheet = wb.getActiveSheet();
+      if (sheet) {
+        var maxR = sheet.getMaxRows();
+        var maxC = sheet.getMaxColumns();
+        for (var i = 0; i < maxR; i++) {
+          for (var j = 0; j < maxC; j++) {
+            var cv = sheet.getRange(i, j).getValue();
+            if (cv !== null && cv !== undefined && cv !== '') {
+              try { sheet.getRange(i, j).setValue(''); } catch (e2) {}
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  // 删除文档保存（同时取消下次自动打开任务窗格，因为已无数据可恢复）
+  if (typeof Office !== 'undefined' && Office.context && Office.context.document && Office.context.document.settings) {
+    try {
+      Office.context.document.settings.remove('univerData');
+      try { Office.context.document.settings.remove('Office.AutoShowTaskpaneWithDocument'); } catch (e3) {}
+      Office.context.document.settings.saveAsync(function(ar) {
+        if (ar.status === Office.AsyncResultStatus.Succeeded) {
+          setStatus('已清除全部数据并删除文档保存（下次打开为空白）', 'ok');
+        } else {
+          setStatus('已清除数据（文档保存删除失败）', 'err');
+        }
+      });
+    } catch (e2) {
+      setStatus('已清除数据（文档保存删除失败）', 'err');
+    }
+  } else {
+    setStatus('已清除全部数据（当前不在 Word 环境）', 'ok');
+  }
+}
+
+function autoSave() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(function() { saveToDocument(); }, 500);
+}
+var _saveTimer = null;
+var _autoSaveInterval = null;
+var _lastSavedAt = null;
+var _cmdHookInstalled = false;
+
+/* ============ 显式保存按钮 ============ */
+function saveDocument() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document) {
+    setStatus('当前不在 Word 环境', 'err');
+    return;
+  }
+
+  // 检查 SheetJS 是否加载
+  if (typeof XLSX === 'undefined' || !XLSX.utils) {
+    setStatus('SheetJS 库未加载，无法生成 XLSX。请刷新页面重试。', 'err');
+    return;
+  }
+
+  setStatus('正在生成 XLSX 并保存…', 'working');
+
+  try {
+    var wbData = getWorkbookData();
+    if (!wbData || !wbData.sheets || wbData.sheets.length === 0) {
+      setStatus('工作簿为空，无需保存', 'err');
+      return;
+    }
+
+    // 检查是否有实际数据
+    var hasData = false;
+    for (var di = 0; di < wbData.sheets.length; di++) {
+      if (wbData.sheets[di].rows && wbData.sheets[di].rows.length > 0) { hasData = true; break; }
+    }
+    if (!hasData) {
+      setStatus('工作簿为空（无数据），无需保存', 'err');
+      return;
+    }
+
+    // —— 1. 用 SheetJS 生成 XLSX ——
+    var xlsxWb = XLSX.utils.book_new();
+    var totalSheets = 0, totalRows = 0, totalCols = 0;
+    var allEmpty = true;
+
+    for (var si = 0; si < wbData.sheets.length; si++) {
+      var s = wbData.sheets[si];
+      if (!s.rows || s.rows.length === 0) continue;
+      allEmpty = false;
+      var ws = XLSX.utils.aoa_to_sheet(s.rows);
+      var safeName = (s.name || 'Sheet' + (si + 1)).replace(/[\\/*?[\]:]/g, '_').substring(0, 31);
+      XLSX.utils.book_append_sheet(xlsxWb, ws, safeName);
+      totalSheets++;
+      if (s.maxR >= 0) { totalRows = Math.max(totalRows, s.maxR + 1); totalCols = Math.max(totalCols, s.maxC + 1); }
+    }
+
+    if (allEmpty || totalSheets === 0) {
+      setStatus('没有可导出的数据', 'err');
+      return;
+    }
+
+    var xlsxOut = XLSX.write(xlsxWb, { bookType: 'xlsx', type: 'array' });
+    var xlsxB64 = _arrayBufferToBase64(xlsxOut);
+
+    // —— 2. 获取 Word 文档路径 ——
+    Office.context.document.getFilePropertiesAsync(function(result) {
+      var docPath = '';
+      var isLocal = false;
+      if (result.status === Office.AsyncResultStatus.Succeeded) {
+        var url = result.value.url || '';
+        // 如果是本地文件（file:/// 或没有 http 前缀）
+        if (url.indexOf('file:///') === 0 || (url.indexOf('http://') !== 0 && url.indexOf('https://') !== 0)) {
+          isLocal = true;
+          docPath = url.replace(/^file:\/\/\//i, '').replace(/\//g, '\\');
+          // 去掉文件名，得到目录
+          var lastSlash = Math.max(docPath.lastIndexOf('\\'), docPath.lastIndexOf('/'));
+          if (lastSlash >= 0) docPath = docPath.substring(0, lastSlash);
+        }
+      }
+
+      // —— 3. 构建保存信息 ——
+      var TARGET_DIRNAME = 'C001 WORD核对目录';
+      var targetFolder = docPath ? (docPath + '\\' + TARGET_DIRNAME) : '';
+
+      // 文件名
+      var fileName;
+      if (isLocal) {
+        // 本地文件：使用 Word 文件名 + 核对
+        var docName = docPath.split('\\').pop() || 'document';
+        var wf = docName.replace(/\.[^.]+$/, '');
+        fileName = wf + ' 核对.xlsx';
+      } else {
+        // 未保存：用 8 位日期 + 时分秒
+        var now = new Date();
+        var y = now.getFullYear();
+        var mo = String(now.getMonth() + 1).padStart(2, '0');
+        var d = String(now.getDate()).padStart(2, '0');
+        var hh = String(now.getHours()).padStart(2, '0');
+        var mm = String(now.getMinutes()).padStart(2, '0');
+        var ss = String(now.getSeconds()).padStart(2, '0');
+        fileName = '' + y + mo + d + hh + mm + ss + ' 核对.XLSX';
+      }
+
+      // —— 4. 存入 Word 文档变量 + 触发保存 ——
+      try {
+        var doc = Office.context.document;
+        doc.settings.set('C001_XLSX_B64', xlsxB64);
+        doc.settings.set('C001_Filename', fileName);
+        doc.settings.set('C001_TargetFolder', targetFolder);
+        doc.settings.set('C001_IsLocal', isLocal ? '1' : '0');
+        doc.settings.set('C001_Action', 'save');
+        doc.settings.set('C001_SheetCount', String(totalSheets));
+        doc.settings.set('C001_MaxRows', String(totalRows));
+        doc.settings.set('C001_MaxCols', String(totalCols));
+
+        try { doc.settings.set('Office.AutoShowTaskpaneWithDocument', true); } catch (e3) {}
+
+        doc.settings.saveAsync(function(ar) {
+          if (ar.status === Office.AsyncResultStatus.Succeeded) {
+            // —— 5. 触发 VBA 保存 ——
+            _triggerVBASave();
+
+            var sizeKB = Math.round(xlsxOut.length / 1024);
+            var msg = 'XLSX 已生成：' + totalSheets + ' 个工作表 / ' + totalRows + '×' + totalCols
+              + ' / ' + sizeKB + ' KB → ' + (targetFolder || '默认位置') + '\\' + fileName;
+            setStatus(msg, 'ok');
+
+            // 同时触发浏览器下载
+            _triggerDownload(xlsxOut, fileName);
+          } else {
+            setStatus('保存失败：' + (ar.error && ar.error.message ? ar.error.message : ''), 'err');
+          }
+        });
+      } catch (e2) {
+        setStatus('写入文档变量失败：' + (e2.message || e2), 'err');
+      }
+    });
+  } catch (e) {
+    setStatus('保存失败：' + (e.message || e), 'err');
+  }
+}
+
+function _arrayBufferToBase64(buffer) {
+  var binary = '';
+  var bytes = new Uint8Array(buffer);
+  for (var i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function _triggerDownload(arrayBuffer, fileName) {
+  try {
+    var blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
+  } catch (e) {}
+}
+
+function _triggerVBASave() {
+  // 通过 Content Control 触发 VBA 保存流程
+  // 用户需先运行 C001_Setup 宏创建触发器控件
+  try {
+    var doc = Office.context.document;
+    // 在当前光标位置写入触发文本
+    // 如果光标在 C001_Trigger 控件内，VBA 事件会被触发
+    doc.setSelectedDataAsync('C001_SAVE', {
+      coercionType: Office.CoercionType.Text
+    }, function(result) {
+      // 1秒后清除触发文本（避免干扰文档）
+      setTimeout(function() {
+        try {
+          doc.setSelectedDataAsync('', { coercionType: Office.CoercionType.Text });
+        } catch (e) {}
+      }, 1000);
+    });
+  } catch (e) {
+    // VBA 未就绪不影响下载流程
+  }
+}
+
+/* ============ 放大窗口：Office Dialog API ============ */
+var _expandDialog = null;
+function expandDialog() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.ui || !Office.context.ui.displayDialogAsync) {
+    setStatus('当前不支持 Dialog API', 'err');
+    return;
+  }
+  // 若已打开浮窗，先关闭
+  if (_expandDialog) {
+    try { _expandDialog.close(); } catch (e) {}
+    _expandDialog = null;
+    var btn = document.getElementById('btnExpand');
+    if (btn) btn.textContent = '⛶ 放大';
+    return;
+  }
+  // 先把当前 taskpane 数据落盘，dialog 内重建时有据可依
+  saveToDocument();
+
+  try {
+    var url = 'https://localhost:8443/word-addin/excel/univer/dialog.html?from=taskpane&ts=' + Date.now();
+    Office.context.ui.displayDialogAsync(url, {
+      height: 720,
+      width: 1200,
+      displayInIframe: false,
+      hideTitleWhenSingleTab: false
+    }, function(asyncResult) {
+      if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+        setStatus('无法打开浮窗：' + (asyncResult.error && asyncResult.error.message ? asyncResult.error.message : asyncResult.error), 'err');
+        return;
+      }
+      _expandDialog = asyncResult.value;
+      var btn = document.getElementById('btnExpand');
+      if (btn) btn.textContent = '⛶ 收回';
+      setStatus('已打开浮窗，在 Word 上方独立编辑中；点「收回」或关闭浮窗', 'ok');
+
+      // 监听 dialog 消息
+      _expandDialog.addEventHandler(Office.EventType.DialogMessageReceived, function(arg) {
+        try {
+          var m = arg.message;
+          if (m === 'close' || m === 'saved_close') {
+            try { _expandDialog.close(); } catch (e) {}
+          }
+          if (m === 'saved') {
+            setStatus('已在浮窗内点击保存', 'ok');
+          }
+        } catch (e) {}
+      });
+      // 监听 dialog 关闭
+      _expandDialog.addEventHandler(Office.EventType.DialogEventReceived, function(arg) {
+        _expandDialog = null;
+        if (btn) btn.textContent = '⛶ 放大';
+        // dialog 关闭时，从 settings 同步回 taskpane（用户可能在 dialog 里改了数据）
+        try {
+          var saved = loadFromDocument();
+          if (saved) {
+            loadWorkbookData(saved);
+            var sc = (saved.sheets || []).length;
+            setStatus('浮窗已关闭，已同步最新数据回到 taskpane（' + sc + ' 个工作表）', 'ok');
+          } else {
+            setStatus('浮窗已关闭', 'ok');
+          }
+        } catch (e2) {
+          setStatus('浮窗已关闭（同步失败）', 'err');
+        }
+      });
+    });
+  } catch (e) {
+    setStatus('打开浮窗失败：' + (e.message || e), 'err');
+  }
+}
+
+/* ============ 示例数据 ============ */
+function loadSample() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  var sample = [
+    ['产品', '数量', '单价', '金额', '校验'],
+    ['A', 10, 50, '=B2*C2', '=IF(D2>400,"通过","未达")'],
+    ['B', 5, 200, '=B3*C3', '=IF(D3>400,"通过","未达")'],
+    ['C', 3, 800, '=B4*C4', '=IF(D4>400,"通过","未达")'],
+    ['合计', '=SUM(B2:B4)', '', '=SUM(D2:D4)', '=COUNTIF(E2:E4,"通过")&" 项通过"']
+  ];
+  var wb = univerAPI.getActiveWorkbook();
+  if (wb) {
+    var sheet = wb.getActiveSheet();
+    if (sheet) _fillSheetData(sheet, { rows: sample });
+  }
+  autoSave();
+  setStatus('已加载示例：5 行 × 5 列，含 SUM / IF / COUNTIF 公式', 'ok');
+}
+
+/* ============ Word → 工作表：导入选中区域内的所有表格（每个间隔6行） ============ */
+function importWordTable() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  setStatus('正在读取选中区域内的表格…', 'working');
+
+  var GAP = 6;        // 每个表之间间隔6行
+  var START_COL = 2;  // 默认起始列：第3列（C列）
+  var START_ROW = 5;  // 默认起始行：第6行
+
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    var selRange = ctx.document.getSelection().getRange();
+    selRange.load(['start', 'end']);
+
+    return ctx.sync().then(function() {
+      if (!tables.items || tables.items.length === 0) {
+        setStatus('文档中没有表格', 'err');
+        return;
+      }
+      _totalTables = tables.items.length;
+
+      var tblRanges = [];
+      for (var i = 0; i < tables.items.length; i++) {
+        var r = tables.items[i].getRange();
+        r.load(['start', 'end']);
+        tblRanges.push(r);
+      }
+
+      return ctx.sync().then(function() {
+        var selStart = selRange.start;
+        var selEnd = selRange.end;
+
+        var inSelection = [];
+        for (var j = 0; j < tblRanges.length; j++) {
+          var ts = tblRanges[j].start;
+          var te = tblRanges[j].end;
+          if (te > selStart && ts < selEnd) {
+            inSelection.push(j);
+          }
+        }
+
+        if (inSelection.length === 0) {
+          setStatus('选区内没有表格，请先选中包含表格的区域', 'err');
+          return;
+        }
+
+        for (var k = 0; k < inSelection.length; k++) {
+          tables.items[inSelection[k]].load('values');
+        }
+
+        return ctx.sync().then(function() {
+          var wb = univerAPI.getActiveWorkbook();
+          var sheet = wb.getActiveSheet();
+
+          var startCol = START_COL;
+          var startRow = START_ROW;
+
+          if (_clearBeforePaste) {
+            // 默认模式：先清空工作表，再从 C6 开始粘贴
+            var oldR = 0, oldC = 0;
+            try { oldR = sheet.getMaxRows(); } catch (e1) {}
+            try { oldC = sheet.getMaxColumns(); } catch (e2) {}
+            for (var ri = 0; ri < oldR; ri++) {
+              for (var ci = 0; ci < oldC; ci++) {
+                try {
+                  var cv = sheet.getRange(ri, ci).getValue();
+                  if (cv !== null && cv !== undefined && cv !== '') sheet.getRange(ri, ci).setValue('');
+                } catch (e3) {}
+              }
+            }
+          } else {
+            // 光标模式：从当前光标位置开始粘贴，不清空
+            try {
+              var ar = sheet.getActiveRange();
+              if (ar) {
+                try { startRow = ar.getRow(); } catch (e4) {}
+                try { startCol = ar.getColumn(); } catch (e5) {}
+              }
+            } catch (e6) {}
+          }
+
+          var writeRow = startRow;
+          var totalRows = 0;
+          for (var t = 0; t < inSelection.length; t++) {
+            var data2d = tables.items[inSelection[t]].values;
+            if (!data2d || data2d.length === 0) continue;
+            for (var dr = 0; dr < data2d.length; dr++) {
+              if (!data2d[dr]) continue;
+              for (var dc = 0; dc < data2d[dr].length; dc++) {
+                var val = data2d[dr][dc];
+                if (val !== null && val !== undefined && val !== '') {
+                  try { sheet.getRange(writeRow + dr, startCol + dc).setValue(val); } catch (e7) {}
+                }
+              }
+            }
+            totalRows += data2d.length;
+            writeRow += data2d.length + GAP;
+          }
+
+          autoSave();
+          _curTableIdx = inSelection[inSelection.length - 1];
+          var mode = _clearBeforePaste ? '从C6开始（已清空）' : '从光标位置开始';
+          setStatus('已导入选区内 ' + inSelection.length + ' 个表格（共 ' + totalRows + ' 行，每表间隔 ' + GAP + ' 行，' + mode + '）', 'ok');
+        });
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + (err.message || err), 'err');
+  });
+}
+
+/* ============ 基于光标实时位置找"下一个表格"的索引 ============
+ * 仿 VBA 思路：用每个表格在文档中的起始位置(getStart)比较，
+ * 取"位于光标位置之后"的第一个表格。不依赖对象引用比较/计数器。
+ * 返回 Promise<number>，找不到返回 -1
+ */
+function _findNextTableIndex(ctx, tables) {
+  var selRange = ctx.document.getSelection().getRange();
+  selRange.load('start');
+  // 把每个表格的 range 存入数组并 load start（不能在 sync 后重新 getRange()）
+  var tblRanges = [];
+  for (var i = 0; i < tables.items.length; i++) {
+    var r = tables.items[i].getRange();
+    r.load('start');
+    tblRanges.push(r);
+  }
+  return ctx.sync().then(function() {
+    var caret = selRange.start;          // 光标在文档中的位置
+    var best = -1, bestStart = Infinity;
+    for (var j = 0; j < tblRanges.length; j++) {
+      var s = tblRanges[j].start;
+      // 找第一个"起始位置 > 光标位置"的表格（即光标之后的下一个表格）
+      if (s > caret && s < bestStart) {
+        bestStart = s;
+        best = j;
+      }
+    }
+    return best;
+  });
+}
+
+/* ============ 跳下一个：光标实时位置之后的下一个表格，落到首格 ============ */
+function selectNextTable() {
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    return ctx.sync().then(function() {
+      if (!tables.items || tables.items.length === 0) {
+        setStatus('文档中没有表格', 'err');
+        return;
+      }
+      _totalTables = tables.items.length;
+      return _findNextTableIndex(ctx, tables).then(function(nextIdx) {
+        if (nextIdx < 0) {
+          setStatus('光标之后已无表格（共 ' + tables.items.length + ' 个）', 'err');
+          return;
+        }
+        tables.items[nextIdx].select();
+        _curTableIdx = nextIdx;
+        return ctx.sync().then(function() {
+          var firstCell = tables.items[nextIdx].getCell(0, 0);
+          firstCell.select();
+          return ctx.sync().then(function() {
+            setStatus('已跳到下个表格（第 ' + (nextIdx + 1) + ' / ' + tables.items.length + ' 个，首格）', 'ok');
+          });
+        });
+      });
+    });
+  }).catch(function(err) {
+    setStatus('跳转失败：' + (err.message || err), 'err');
+  });
+}
+
+/* ============ 选下一个：光标实时位置之后的下一个表格，整表全选 ============ */
+function selectNextTableFull() {
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    return ctx.sync().then(function() {
+      if (!tables.items || tables.items.length === 0) {
+        setStatus('文档中没有表格', 'err');
+        return;
+      }
+      _totalTables = tables.items.length;
+      return _findNextTableIndex(ctx, tables).then(function(nextIdx) {
+        if (nextIdx < 0) {
+          setStatus('光标之后已无表格（共 ' + tables.items.length + ' 个）', 'err');
+          return;
+        }
+        tables.items[nextIdx].select();
+        _curTableIdx = nextIdx;
+        return ctx.sync().then(function() {
+          setStatus('已全选下个表格（第 ' + (nextIdx + 1) + ' / ' + tables.items.length + ' 个）', 'ok');
+        });
+      });
+    });
+  }).catch(function(err) {
+    setStatus('选中失败：' + (err.message || err), 'err');
+  });
+}
+
+
+function importNextTable() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  if (_totalTables === 0) {
+    setStatus('请先点「Word → 表」初始化表格列表', 'err');
+    return;
+  }
+  var nextIdx = _curTableIdx + 1;
+  if (nextIdx >= _totalTables) {
+    setStatus('已是最后一个表格（第 ' + _totalTables + ' 个）', 'err');
+    return;
+  }
+  setStatus('正在读取第 ' + (nextIdx + 1) + ' / ' + _totalTables + ' 个表格…', 'working');
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    return ctx.sync().then(function() {
+      var tbl = tables.items[nextIdx];
+      tbl.load('values');
+      return ctx.sync().then(function() {
+        var data2d = tbl.values;
+        if (!data2d || data2d.length === 0) {
+          setStatus('第 ' + (nextIdx + 1) + ' 个表格为空', 'err');
+          return;
+        }
+        loadDataIntoActiveSheet(data2d);
+        autoSave();
+        _curTableIdx = nextIdx;
+        var cols = data2d[0] ? data2d[0].length : 0;
+        setStatus('已导入第 ' + (nextIdx + 1) + ' / ' + tables.items.length
+          + ' 个表格：' + data2d.length + ' 行 × ' + cols + ' 列', 'ok');
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + err.message, 'err');
+  });
+}
+
+/* ============ 基于光标实时位置找"当前所在表格"的索引 ============
+ * 找"起始位置 <= 光标位置 < 结束位置"的表格（即光标所在的表格）
+ * 返回 Promise<number>，找不到返回 -1
+ */
+function _findCurrentTableIndex(ctx, tables) {
+  var selRange = ctx.document.getSelection().getRange();
+  selRange.load('start');
+  var tblRanges = [];
+  for (var i = 0; i < tables.items.length; i++) {
+    var r = tables.items[i].getRange();
+    r.load(['start', 'end']);
+    tblRanges.push(r);
+  }
+  return ctx.sync().then(function() {
+    var caret = selRange.start;
+    var best = -1, bestStart = -Infinity;
+    for (var j = 0; j < tblRanges.length; j++) {
+      var s = tblRanges[j].start;
+      var e = tblRanges[j].end;
+      // 光标在表格范围内（start <= caret < end）
+      if (s <= caret && caret < e && s > bestStart) {
+        bestStart = s;
+        best = j;
+      }
+    }
+    return best;
+  });
+}
+
+/* ============ Word → 工作表：导入光标所在表格（基于位置判断），并自动全选下一个 ============ */
+function importCursorTable() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  setStatus('正在读取光标所在/选区的表格…', 'working');
+  Word.run(function(ctx) {
+    var allTables = ctx.document.body.tables;
+    allTables.load('items');
+    return ctx.sync().then(function() {
+      if (!allTables.items || allTables.items.length === 0) {
+        setStatus('文档中没有表格', 'err');
+        return;
+      }
+      _totalTables = allTables.items.length;
+
+      // 用位置判断找到光标所在表格
+      return _findCurrentTableIndex(ctx, allTables).then(function(curIdx) {
+        if (curIdx < 0) {
+          setStatus('未检测到表格：请把光标放进表格单元里，或用鼠标拖动选区覆盖表格的若干格', 'err');
+          return;
+        }
+        _curTableIdx = curIdx;
+
+        var tbl = allTables.items[curIdx];
+        tbl.load('values');
+        return ctx.sync().then(function() {
+          var data2d = tbl.values;
+          if (!data2d || data2d.length === 0) {
+            setStatus('该表格为空', 'err');
+            return;
+          }
+          loadDataIntoActiveSheet(data2d);
+          autoSave();
+          var cols = data2d[0] ? data2d[0].length : 0;
+
+          // 自动全选下一个表格
+          var nextIdx = curIdx + 1;
+          if (nextIdx < allTables.items.length) {
+            allTables.items[nextIdx].select();
+            _curTableIdx = nextIdx;
+            return ctx.sync().then(function() {
+              setStatus('已导入第 ' + (curIdx + 1) + ' 个表格（' + data2d.length + '行×' + cols + '列），已全选第 ' + (nextIdx + 1) + ' 个', 'ok');
+            });
+          } else {
+            setStatus('已按选区导入第 ' + (curIdx + 1) + ' / ' + allTables.items.length + ' 个表格（已是最后一个）：' + data2d.length + ' 行 × ' + cols + ' 列', 'ok');
+          }
+        });
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + (err.message || err), 'err');
+  });
+}
+
+/* ============ 工作表 → Word：导出 ============ */
+function exportToWord() {
+  if (!isReady || !univerAPI) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+
+  setStatus('正在生成 Word 表格…', 'working');
+
+  try {
+    var wbData = getWorkbookData();
+    if (!wbData || !wbData.sheets || wbData.sheets.length === 0) {
+      setStatus('工作簿为空，无法导出。请先填入数据或加载示例。', 'err');
+      return;
+    }
+    // 导出第一个有数据的 sheet
+    var sheetData = null;
+    for (var si = 0; si < wbData.sheets.length; si++) {
+      if (wbData.sheets[si].rows && wbData.sheets[si].rows.length > 0) { sheetData = wbData.sheets[si]; break; }
+    }
+    if (!sheetData) {
+      setStatus('工作簿为空，无法导出。请先填入数据或加载示例。', 'err');
+      return;
+    }
+    var maxR = sheetData.maxR;
+    var maxC = sheetData.maxC;
+    var rows = sheetData.rows;
+
+    var html = '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:宋体;font-size:11pt;">';
+    for (var r = 0; r <= maxR; r++) {
+      html += '<tr>';
+      for (var c = 0; c <= maxC; c++) {
+        var text = (rows[r] && rows[r][c]) || '';
+        var cellHtml = escHtml(text).replace(/\r?\n/g, '<br>');
+        if (r === 0) {
+          html += '<td style="border:1px solid #888;padding:4px;background:#f0f0f0;font-weight:bold;">' + cellHtml + '</td>';
+        } else {
+          html += '<td style="border:1px solid #888;padding:4px;">' + cellHtml + '</td>';
+        }
+      }
+      html += '</tr>';
+    }
+    html += '</table><p></p>';
+
+    Word.run(function(ctx) {
+      var sel = ctx.document.getSelection();
+      sel.insertHtml(html, Word.InsertLocation.replace);
+      return ctx.sync().then(function() {
+        setStatus('已导出 ' + (maxR + 1) + ' 行 × ' + (maxC + 1) + ' 列到 Word（光标位置）', 'ok');
+      });
+    }).catch(function(err) {
+      setStatus('导出失败：' + err.message, 'err');
+    });
+  } catch (e) {
+    setStatus('导出失败：' + e.message, 'err');
+  }
+}
+
+/* ============ 初始化 Univer ============ */
+function initUniver() {
+  try {
+    var hint = document.getElementById('loadingHint');
+    var stages = [];
+    var progress = function(msg) {
+      stages.push(msg);
+      setStatus('初始化：' + msg, 'working');
+      try { console.log('[Univer-init]', msg); } catch(e) {}
+    };
+
+    progress('检查脚本依赖…');
+
+    var missing = [];
+    if (typeof UniverPresets === 'undefined') missing.push('univer-presets.umd.js');
+    if (typeof UniverPresetSheetsCore === 'undefined') missing.push('univer-preset-sheets-core.umd.js');
+    if (missing.length) {
+      var msg = '缺少核心脚本：' + missing.join('、') + '。请确认 dist 目录完整。';
+      setStatus(msg, 'err');
+      if (hint) hint.innerHTML = '<div class="fallback"><p><strong>脚本加载失败</strong></p><p>' + escHtml(msg) + '</p></div>';
+      return;
+    }
+
+    progress('解析 API…');
+
+    var createUniver = UniverPresets.createUniver;
+    if (typeof createUniver !== 'function') {
+      setStatus('UniverPresets.createUniver 不可用', 'err');
+      if (hint) hint.innerHTML = '<div class="fallback"><p><strong>API 不兼容</strong></p><p>Univer 版本与当前集成代码不匹配。</p></div>';
+      return;
+    }
+
+    var LocaleType = (UniverCore && UniverCore.LocaleType) || null;
+    var mergeLocales = (UniverCore && UniverCore.mergeLocales) || function() {
+      var out = {};
+      for (var i = 0; i < arguments.length; i++) {
+        var l = arguments[i];
+        if (l && typeof l === 'object') {
+          for (var k in l) { if (Object.prototype.hasOwnProperty.call(l, k)) out[k] = l[k]; }
+        }
+      }
+      return out;
+    };
+    var UniverSheetsCorePreset = UniverPresetSheetsCore.UniverSheetsCorePreset;
+
+    progress('构建预设…');
+
+    // 收集所有可用的 preset 与 locale（若某个包没加载也不影响其它）
+    var presetFns = [UniverSheetsCorePreset({ container: 'univer-app' })];
+    var zhCNAvailable = [];
+    if (typeof UniverPresetSheetsCoreZhCN !== 'undefined') {
+      zhCNAvailable.push(UniverPresetSheetsCoreZhCN);
+    }
+
+    if (typeof UniverPresetSheetsDrawing !== 'undefined' && UniverPresetSheetsDrawing.UniverSheetsDrawingPreset) {
+      presetFns.push(UniverPresetSheetsDrawing.UniverSheetsDrawingPreset({ container: 'univer-app' }));
+      if (typeof UniverPresetSheetsDrawingZhCN !== 'undefined') {
+        zhCNAvailable.push(UniverPresetSheetsDrawingZhCN);
+      }
+    }
+    if (typeof UniverPresetSheetsAdvanced !== 'undefined' && UniverPresetSheetsAdvanced.UniverSheetsAdvancedPreset) {
+      presetFns.push(UniverPresetSheetsAdvanced.UniverSheetsAdvancedPreset({ container: 'univer-app' }));
+      if (typeof UniverPresetSheetsAdvancedZhCN !== 'undefined') {
+        zhCNAvailable.push(UniverPresetSheetsAdvancedZhCN);
+      }
+    }
+
+    var initOpts = {
+      presets: presetFns
+    };
+    if (LocaleType) {
+      initOpts.locale = LocaleType.ZH_CN;
+      initOpts.locales = {};
+      initOpts.locales[LocaleType.ZH_CN] = mergeLocales.apply(null, zhCNAvailable);
+    }
+
+    progress('创建实例…');
+
+    var result = createUniver(initOpts);
+
+    univerAPI = result.univerAPI;
+
+    progress('创建空白工作簿…');
+
+    // 创建空白工作簿
+    univerAPI.createWorkbook({ name: 'Sheet1' });
+
+    if (hint) hint.style.display = 'none';
+
+    // ===== 自动保存：三层保障 =====
+    // 1) 定时保存：3 秒一次兜底（防止用户忘记点「保存」导致数据丢失）
+    if (!_autoSaveInterval) {
+      _autoSaveInterval = setInterval(function() { autoSave(); }, 3000);
+    }
+
+    // 2) 实时保存：挂钩 Univer 命令执行，单元格编辑/公式/格式变更后立即触发 autoSave（已内置 500ms 防抖）
+    //    多路径尝试，兼容不同 Univer 版本的 API 形态；失败则依赖定时保存兜底
+    if (!_cmdHookInstalled) {
+      _cmdHookInstalled = true;
+      try {
+        var cmdSvc = null;
+        if (univerAPI.getCommandService) cmdSvc = univerAPI.getCommandService();
+        else if (univerAPI.getUniver) {
+          var _u = univerAPI.getUniver();
+          if (_u && _u.getCommandService) cmdSvc = _u.getCommandService();
+          else if (_u && _u.__getInjector) cmdSvc = _u.__getInjector().getCommandService ? null : null;
+        }
+        if (cmdSvc && cmdSvc.onCommandExecuted) {
+          cmdSvc.onCommandExecuted(function(cmd) {
+            try {
+              if (!cmd || !cmd.id) return;
+              // 仅对单元格值/公式/行列增删/格式类命令触发保存，避免无谓写入
+              var id = cmd.id || '';
+              if (id.indexOf('set-range') >= 0 || id.indexOf('set-cell') >= 0
+                  || id.indexOf('set-value') >= 0 || id.indexOf('move-rows') >= 0
+                  || id.indexOf('move-cols') >= 0 || id.indexOf('insert-row') >= 0
+                  || id.indexOf('insert-col') >= 0 || id.indexOf('remove-row') >= 0
+                  || id.indexOf('remove-col') >= 0 || id.indexOf('set-format') >= 0
+                  || id.indexOf('set-style') >= 0 || id.indexOf('set-formula') >= 0) {
+                autoSave();
+              }
+            } catch (e3) {}
+          });
+        }
+      } catch (e4) {}
+
+      // 3) DOM 兜底：监听容器内的键盘抬起与 change 事件，确保即使命令挂钩失败也能捕获用户编辑
+      var ctn = document.getElementById('univer-container');
+      if (ctn) {
+        ctn.addEventListener('keyup', function() { autoSave(); });
+        ctn.addEventListener('change', function() { autoSave(); });
+        ctn.addEventListener('blur', function() { autoSave(); }, true);
+      }
+    }
+
+    setReady(true);
+    setStatus('就绪（Univer）', 'ok');
+
+    // ===== 自动恢复：从 Word 文档 Settings 读取本文档上次保存的完整工作簿（所有 sheet） =====
+    // 带重试机制（工作簿初始化可能需要几帧才能稳定接受写入）
+    var tryAutoRestore = function(attempt) {
+      attempt = attempt || 0;
+      if (attempt > 12) return;
+      try {
+        var wb = univerAPI.getActiveWorkbook();
+        if (!wb) { setTimeout(function() { tryAutoRestore(attempt + 1); }, 200); return; }
+        var sheet = wb.getActiveSheet();
+        if (!sheet) { setTimeout(function() { tryAutoRestore(attempt + 1); }, 200); return; }
+        var saved = loadFromDocument();
+        if (saved) {
+          loadWorkbookData(saved);
+          var sheetCount = (saved.sheets || []).length;
+          var totalRows = 0, totalCols = 0;
+          for (var si = 0; si < (saved.sheets || []).length; si++) {
+            var s = saved.sheets[si];
+            if (s.maxR >= 0) { totalRows = Math.max(totalRows, s.maxR + 1); totalCols = Math.max(totalCols, s.maxC + 1); }
+          }
+          setStatus('已自动恢复：' + sheetCount + ' 个工作表，最大 ' + totalRows + ' 行 × ' + totalCols + ' 列（绑定此 Word 文档）', 'ok');
+        } else {
+          setStatus('就绪（Univer）— 此 Word 文档暂无保存的表格数据', 'ok');
+        }
+      } catch (e2) {
+        setTimeout(function() { tryAutoRestore(attempt + 1); }, 200);
+      }
+    };
+    setTimeout(tryAutoRestore, 400);
+  } catch (e) {
+    var container = document.getElementById('univer-container');
+    if (container) {
+      container.innerHTML = '<div class="fallback"><p><strong>初始化失败</strong></p><p>' + escHtml(e.message) + '</p></div>';
+    }
+    setStatus('初始化失败: ' + e.message, 'err');
+  }
+}
+
+/* 等待外部脚本（React/RxJS/Univer）加载就绪 */
+(function() {
+  var maxWait = 100;
+  var waitCount = 0;
+  function checkInit() {
+    waitCount++;
+    var ok = (typeof UniverPresets !== 'undefined')
+          && (typeof UniverPresetSheetsCore !== 'undefined')
+          && (typeof UniverCore !== 'undefined')
+          && (typeof UniverPresetSheetsCoreZhCN !== 'undefined');
+    if (ok) {
+      initUniver();
+    } else if (waitCount < maxWait) {
+      setTimeout(checkInit, 200);
+    } else {
+      var have = {
+        UniverPresets: typeof UniverPresets,
+        UniverPresetSheetsCore: typeof UniverPresetSheetsCore,
+        UniverCore: typeof UniverCore,
+        UniverPresetSheetsCoreZhCN: typeof UniverPresetSheetsCoreZhCN,
+        UniverPresetSheetsDrawing: typeof UniverPresetSheetsDrawing,
+        UniverPresetSheetsAdvanced: typeof UniverPresetSheetsAdvanced
+      };
+      var container = document.getElementById('univer-container');
+      if (container) {
+        var rows = '';
+        for (var k in have) {
+          rows += '<tr><td style="padding:2px 8px;border:1px solid #ddd;">' + escHtml(k) + '</td><td style="padding:2px 8px;border:1px solid #ddd;">' + escHtml(have[k]) + '</td></tr>';
+        }
+        container.innerHTML = '<div class="fallback">'
+          + '<p><strong>Univer 组件加载失败</strong></p>'
+          + '<p>核心脚本未全部就绪（本地 dist 资源），当前检测状态：</p>'
+          + '<table style="margin:10px auto;border-collapse:collapse;font-family:Consolas,monospace;font-size:12px;">'
+          + '<tr style="background:#f0f0f0;"><th style="padding:2px 8px;border:1px solid #ddd;">全局变量</th><th style="padding:2px 8px;border:1px solid #ddd;">类型</th></tr>'
+          + rows
+          + '</table>'
+          + '<p>建议：</p>'
+          + '<p>1. 确认 dist 目录下 7 个 UMD/本地化 .js 文件完整</p>'
+          + '<p>2. 用浏览器开发者工具（F12）查看 Console 是否有错误</p>'
+          + '<p>3. 用浏览器直接打开 index.html 测试是否能正常加载</p>'
+          + '</div>';
+      }
+      setStatus('组件加载失败：核心脚本未就绪（本地 dist）', 'err');
+      try { console.error('[Univer-init] 加载失败状态', have); } catch(e) {}
+    }
+  }
+  checkInit();
+})();
+
+Office.onReady(function(info) {
+  // 仅在尚未显示"已恢复"等具体提示时才覆盖，避免压掉自动恢复的成功消息
+  if (isReady) {
+    var cur = document.getElementById('status');
+    var txt = cur ? cur.textContent : '';
+    if (txt.indexOf('就绪') === 0 || txt.indexOf('初始化') === 0 || txt.indexOf('正在') === 0) {
+      setStatus('就绪（Univer / ' + (info.host || 'Word') + '）', 'ok');
+    }
+  }
+});
+
+/* 页面关闭/隐藏时保存 */
+window.addEventListener('beforeunload', function() { saveToDocument(); });
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) saveToDocument();
+});
+</script>
+</body>
+</html>

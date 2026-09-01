@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>表格批量设置</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 12px; margin: 0; font-size: 13px; background: #f0f0f0; }
+        .section { margin-bottom: 12px; }
+        .section-title { color: #c00000; font-weight: bold; margin-bottom: 5px; font-size: 13px; }
+        .radio-row { margin: 3px 0; }
+        .radio-row label { margin-right: 14px; cursor: pointer; }
+        .sub-options { margin-left: 20px; margin-top: 5px; display: none; }
+        .sub-options.active { display: block; }
+        .param-row { margin: 4px 0; display: flex; align-items: center; flex-wrap: wrap; }
+        .param-row label { display: inline-block; min-width: 44px; color: #555; font-size: 12px; }
+        .param-row input[type="text"] { width: 60px; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; }
+        .param-row input[type="text"].wide { width: 140px; }
+        .param-row span { margin: 0 4px; color: #666; font-size: 12px; }
+        .action-btn { background: #ffe0e0; border: 1px solid #c00000; color: #c00000; padding: 4px 10px; cursor: pointer; font-size: 12px; margin-left: 6px; }
+        .action-btn:hover { background: #ffc0c0; }
+        .tip { color: #888; font-size: 11px; margin-left: 6px; }
+        .divider { border: none; border-top: 1px solid #aaa; margin: 10px 0; }
+        .btn-area { margin-top: 14px; display: flex; justify-content: space-between; align-items: center; }
+        .btn { padding: 6px 18px; font-size: 13px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; }
+        .btn:hover { background: #d0d0d0; }
+        .btn-primary { background: #c00000; color: #fff; border-color: #a00000; }
+        .btn-primary:hover { background: #a00000; }
+        #statusText { margin-top: 8px; font-size: 12px; color: #2b579a; min-height: 16px; word-break: break-all; }
+        .folder-row { display: flex; align-items: center; margin: 4px 0; }
+        .folder-row input[type="text"] { flex: 1; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; margin-right: 6px; }
+        .folder-row .browse-btn { padding: 4px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; white-space: nowrap; }
+        .folder-row .browse-btn:hover { background: #d0d0d0; }
+        .file-count { font-size: 11px; color: #666; margin-left: 6px; white-space: nowrap; }
+        .progress-bar { width: 100%; height: 6px; background: #ddd; margin-top: 6px; display: none; border-radius: 3px; overflow: hidden; }
+        .progress-bar .fill { height: 100%; background: #2b579a; width: 0%; transition: width 0.2s; }
+        select { padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; }
+        .op-desc { color: #555; font-size: 12px; margin: 4px 0; padding: 6px; background: #fff; border: 1px solid #ddd; border-radius: 2px; }
+        .stats { color: #666; font-size: 11px; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <!-- 范围 -->
+    <div class="section">
+        <div class="section-title">处理范围：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="scope" value="current" checked> 当前文档</label>
+            <label><input type="radio" name="scope" value="multiple"> 多个 Word 文档</label>
+        </div>
+        <div id="folderOptions" class="sub-options">
+            <div class="folder-row">
+                <input type="text" id="folderPath" placeholder="输入文件夹路径或点击浏览选择...">
+                <button id="browseBtn" class="browse-btn">选择文件夹</button>
+                <span id="fileCount" class="file-count"></span>
+            </div>
+            <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;" accept=".docx">
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- 批量操作选择 -->
+    <div class="section">
+        <div class="section-title">批量操作：</div>
+        <div class="param-row">
+            <select id="batchOp" style="min-width: 200px;">
+                <option value="headerRow">首行以标题行形式重复出现</option>
+                <!-- 未来扩展：
+                <option value="firstColumn">首列在各页重复出现</option>
+                <option value="autoFit">自动调整表格大小</option>
+                <option value="uniformRows">指定行高</option>
+                <option value="uniformCols">指定列宽</option>
+                <option value="clearBorders">清除所有边框</option>
+                <option value="setBorders">设置统一边框样式</option>
+                -->
+            </select>
+        </div>
+        <div id="opPanel_headerRow" class="op-panel">
+            <div class="op-desc">
+                对文档中所有表格的首行设置<b>"在各页顶端以标题行形式重复出现"</b>。<br>
+                如果表格首行已设置，会跳过；如果未设置，会自动开启。
+            </div>
+        </div>
+        <!-- 未来扩展面板可在此处添加 -->
+    </div>
+
+    <!-- 表格统计 -->
+    <div class="section">
+        <div class="section-title">文档表格统计：</div>
+        <div class="param-row">
+            <button id="scanBtn" class="action-btn" style="margin-left:0;">扫描当前文档</button>
+            <span id="scanResult" class="stats"></span>
+        </div>
+        <div id="navRow" class="param-row" style="display:none; margin-top:6px; align-items:center;">
+            <button id="prevBtn" class="action-btn" style="margin-left:0;">&#9664; 上一个</button>
+            <span id="navPos" style="margin:0 6px; font-size:12px; color:#555; min-width:44px; text-align:center;">-</span>
+            <button id="nextBtn" class="action-btn" style="margin-left:0;">下一个 &#9654;</button>
+            <span class="tip">跳转到无首行重复的表格</span>
+            <button id="clearMarkBtn" class="action-btn" style="margin-left:8px;">清除标记</button>
+        </div>
+    </div>
+
+    <div class="btn-area">
+        <button id="defaultBtn" class="btn">默认设置</button>
+        <button id="okBtn" class="btn btn-primary">执 行</button>
+    </div>
+
+    <div id="progressBar" class="progress-bar"><div id="progressFill" class="fill"></div></div>
+    <p id="statusText">就绪 - 请选择处理范围后点击【执行】</p>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    // === 全局变量 ===
+    var statusEl;
+    var selectedFiles = [];
+    var noHeaderTableIndices = [];
+    var currentNavPos = -1;
+
+    function $(id) { return document.getElementById(id); }
+
+    // === UI 初始化 ===
+    function initUI() {
+        statusEl = $('statusText');
+
+        // 范围切换
+        var scopeRadios = document.getElementsByName('scope');
+        for (var i = 0; i < scopeRadios.length; i++) {
+            scopeRadios[i].onclick = onScopeChange;
+        }
+
+        // 操作切换（预留扩展）
+        $('batchOp').onchange = onOpChange;
+
+        // 按钮事件
+        $('browseBtn').onclick = function() { $('folderInput').click(); };
+        $('folderInput').onchange = onFolderSelected;
+        $('scanBtn').onclick = doScan;
+        $('prevBtn').onclick = goToPrev;
+        $('nextBtn').onclick = goToNext;
+        $('clearMarkBtn').onclick = clearMarks;
+        $('defaultBtn').onclick = doDefault;
+        $('okBtn').onclick = doExecute;
+
+        onScopeChange();
+        onOpChange();
+    }
+
+    function onScopeChange() {
+        var scope = getCheckedValue('scope');
+        $('folderOptions').className = scope === 'multiple' ? 'sub-options active' : 'sub-options';
+    }
+
+    function onOpChange() {
+        // 预留：根据选择的操作显示对应参数面板
+        var op = $('batchOp').value;
+        // 目前只有 headerRow，未来扩展时切换面板可见性
+    }
+
+    function getCheckedValue(name) {
+        var radios = document.getElementsByName(name);
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) return radios[i].value;
+        }
+        return '';
+    }
+
+    // === 文件夹选择 ===
+    function onFolderSelected() {
+        selectedFiles = [];
+        var files = $('folderInput').files;
+        var count = 0;
+        for (var i = 0; i < files.length; i++) {
+            var name = files[i].name.toLowerCase();
+            if (name.endsWith('.docx') || name.endsWith('.doc')) {
+                selectedFiles.push(files[i]);
+                count++;
+            }
+        }
+        if (count > 0) {
+            $('folderPath').value = '已选择 ' + count + ' 个 Word 文件';
+            $('fileCount').textContent = '(' + count + '个)';
+            statusEl.textContent = '已选择 ' + count + ' 个文件，点击【执行】开始处理';
+        } else {
+            $('folderPath').value = '';
+            $('fileCount').textContent = '(未找到 .docx 文件)';
+            statusEl.textContent = '未在所选文件夹中找到 Word 文件';
+        }
+    }
+
+    // === 默认设置 ===
+    function doDefault() {
+        var radios = document.getElementsByName('scope');
+        radios[0].checked = true;
+        $('batchOp').value = 'headerRow';
+        $('folderPath').value = '';
+        $('fileCount').textContent = '';
+        $('scanResult').textContent = '';
+        selectedFiles = [];
+        onScopeChange();
+        onOpChange();
+        statusEl.textContent = '已恢复默认设置';
+    }
+
+    // === 扫描当前文档 ===
+    function doScan() {
+        statusEl.textContent = '正在扫描文档中的表格...';
+        $('scanResult').textContent = '';
+        $('navRow').style.display = 'none';
+        noHeaderTableIndices = [];
+        currentNavPos = -1;
+
+        Word.run(function(context) {
+            var tables = context.document.body.tables;
+            tables.load('items/headerRow');
+            return context.sync().then(function() {
+                var total = tables.items.length;
+                var withHeader = 0;
+
+                // 第一遍：统计 + 清除所有表格高亮
+                for (var i = 0; i < total; i++) {
+                    if (tables.items[i].headerRow) {
+                        withHeader++;
+                        tables.items[i].getRange().font.highlightColor = null;
+                    } else {
+                        noHeaderTableIndices.push(i);
+                    }
+                }
+                return context.sync().then(function() {
+                    // 第二遍：给无首行重复的表格标黄
+                    for (var k = 0; k < noHeaderTableIndices.length; k++) {
+                        var idx = noHeaderTableIndices[k];
+                        tables.items[idx].getRange().font.highlightColor = 'Yellow';
+                    }
+                    return context.sync().then(function() {
+                        var withoutHeader = noHeaderTableIndices.length;
+                        var msg = '共 ' + total + ' 个；已设标题行: ' + withHeader + '；未设: ' + withoutHeader
+                            + (withoutHeader > 0 ? '（已标黄）' : '');
+                        $('scanResult').textContent = msg;
+                        statusEl.textContent = '扫描完成';
+
+                        // 显示/隐藏导航按钮
+                        if (withoutHeader > 0) {
+                            $('navRow').style.display = 'flex';
+                            currentNavPos = 0;
+                            updateNavDisplay();
+                        }
+                    });
+                });
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '扫描失败: ' + error.message;
+        });
+    }
+
+    function updateNavDisplay() {
+        if (noHeaderTableIndices.length === 0 || currentNavPos < 0) {
+            $('navPos').textContent = '-';
+            return;
+        }
+        $('navPos').textContent = (currentNavPos + 1) + '/' + noHeaderTableIndices.length;
+        statusEl.textContent = '当前第 ' + (currentNavPos + 1) + ' / ' + noHeaderTableIndices.length + ' 个（无首行重复表格）';
+    }
+
+    // === 导航：上一个无首行重复表格 ===
+    // 每次动态加载表格并检查 headerRow，确保只在无首行重复表格间跳转
+    function goToPrev() {
+        if (noHeaderTableIndices.length === 0) return;
+        statusEl.textContent = '正在查找上一个...';
+        Word.run(function(context) {
+            var tables = context.document.body.tables;
+            tables.load('items/headerRow');
+            return context.sync().then(function() {
+                var total = tables.items.length;
+                if (total === 0) return;
+
+                // 确定从哪个表格开始向前查找
+                var startIdx = total;
+                if (currentNavPos >= 0 && currentNavPos < noHeaderTableIndices.length) {
+                    startIdx = noHeaderTableIndices[currentNavPos];
+                }
+
+                // 从 startIdx-1 往前找第一个无首行重复的表格
+                var found = -1;
+                for (var i = startIdx - 1; i >= 0; i--) {
+                    if (!tables.items[i].headerRow) { found = i; break; }
+                }
+                // 没找到则从末尾循环往前
+                if (found < 0) {
+                    for (var j = total - 1; j >= startIdx; j--) {
+                        if (!tables.items[j].headerRow) { found = j; break; }
+                    }
+                }
+
+                if (found >= 0) {
+                    selectAndUpdateNav(tables, found);
+                } else {
+                    statusEl.textContent = '未找到无首行重复的表格';
+                }
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '跳转失败: ' + error.message;
+        });
+    }
+
+    // === 导航：下一个无首行重复表格 ===
+    function goToNext() {
+        if (noHeaderTableIndices.length === 0) return;
+        statusEl.textContent = '正在查找下一个...';
+        Word.run(function(context) {
+            var tables = context.document.body.tables;
+            tables.load('items/headerRow');
+            return context.sync().then(function() {
+                var total = tables.items.length;
+                if (total === 0) return;
+
+                // 确定从哪个表格开始向后查找
+                var startIdx = -1;
+                if (currentNavPos >= 0 && currentNavPos < noHeaderTableIndices.length) {
+                    startIdx = noHeaderTableIndices[currentNavPos];
+                }
+
+                // 从 startIdx+1 往后找第一个无首行重复的表格
+                var found = -1;
+                for (var i = startIdx + 1; i < total; i++) {
+                    if (!tables.items[i].headerRow) { found = i; break; }
+                }
+                // 没找到则从头循环
+                if (found < 0) {
+                    for (var j = 0; j <= startIdx; j++) {
+                        if (!tables.items[j].headerRow) { found = j; break; }
+                    }
+                }
+
+                if (found >= 0) {
+                    selectAndUpdateNav(tables, found);
+                } else {
+                    statusEl.textContent = '未找到无首行重复的表格';
+                }
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '跳转失败: ' + error.message;
+        });
+    }
+
+    // 选中表格并更新导航位置
+    function selectAndUpdateNav(tables, tableIndex) {
+        tables.items[tableIndex].getRange().select('Select');
+        return tables.context.sync().then(function() {
+            // 更新 currentNavPos：找到该表格在预扫描列表中的位置
+            for (var p = 0; p < noHeaderTableIndices.length; p++) {
+                if (noHeaderTableIndices[p] === tableIndex) {
+                    currentNavPos = p;
+                    break;
+                }
+            }
+            // 如果预扫描列表中没有（可能是新表格），重新构建列表
+            if (currentNavPos < 0 || noHeaderTableIndices[currentNavPos] !== tableIndex) {
+                noHeaderTableIndices = [];
+                for (var i = 0; i < tables.items.length; i++) {
+                    if (!tables.items[i].headerRow) {
+                        noHeaderTableIndices.push(i);
+                    }
+                }
+                for (var q = 0; q < noHeaderTableIndices.length; q++) {
+                    if (noHeaderTableIndices[q] === tableIndex) {
+                        currentNavPos = q;
+                        break;
+                    }
+                }
+                if (noHeaderTableIndices.length > 0) {
+                    $('navRow').style.display = 'flex';
+                }
+            }
+            updateNavDisplay();
+        });
+    }
+
+    // === 清除标记 ===
+    function clearMarks() {
+        if (noHeaderTableIndices.length === 0) return;
+        statusEl.textContent = '正在清除标记...';
+        Word.run(function(context) {
+            var tables = context.document.body.tables;
+            tables.load('items');
+            return context.sync().then(function() {
+                for (var k = 0; k < noHeaderTableIndices.length; k++) {
+                    var idx = noHeaderTableIndices[k];
+                    if (idx < tables.items.length) {
+                        tables.items[idx].getRange().font.highlightColor = null;
+                    }
+                }
+                return context.sync().then(function() {
+                    noHeaderTableIndices = [];
+                    currentNavPos = -1;
+                    $('navRow').style.display = 'none';
+                    $('navPos').textContent = '-';
+                    statusEl.textContent = '标记已清除';
+                });
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '清除失败: ' + error.message;
+        });
+    }
+
+    // ============================================================
+    // === 主执行入口 ===
+    // ============================================================
+    function doExecute() {
+        var scope = getCheckedValue('scope');
+        var op = $('batchOp').value;
+
+        statusEl.style.color = '#2b579a';
+
+        if (scope === 'multiple') {
+            if (selectedFiles.length === 0) {
+                statusEl.textContent = '请先选择要处理的文件夹';
+                return;
+            }
+            doExecuteMultiple(op);
+        } else {
+            doExecuteCurrent(op);
+        }
+    }
+
+    // ============================================================
+    // === 当前文档处理（Word JS API） ===
+    // ============================================================
+    function doExecuteCurrent(op) {
+        if (op === 'headerRow') {
+            doHeaderRowCurrent();
+        } else {
+            statusEl.textContent = '未知操作: ' + op;
+        }
+    }
+
+    function doHeaderRowCurrent() {
+        statusEl.textContent = '正在设置...';
+        Word.run(function(context) {
+            var tables = context.document.body.tables;
+            // 加载全部表格的 headerRow 和行数以判断哪些是空表
+            tables.load('items/headerRow,items/rowCount');
+            return context.sync().then(function() {
+                var total = tables.items.length;
+                if (total === 0) {
+                    statusEl.textContent = '当前文档中未找到表格';
+                    return;
+                }
+                // 方式一：直接用 API 属性设置（等价 VBA 的 HeadingFormat）
+                var count = 0;
+                for (var i = 0; i < total; i++) {
+                    if (!tables.items[i].headerRow && tables.items[i].rowCount > 0) {
+                        tables.items[i].headerRow = true;
+                        count++;
+                    }
+                }
+                return context.sync().then(function() {
+                    // 验证：重新加载 headerRow 看是否真写入了
+                    tables.load('items/headerRow');
+                    return context.sync().then(function() {
+                        var ok = 0,
+                            failIdx = [];
+                        for (var j = 0; j < total; j++) {
+                            if (tables.items[j].headerRow) {
+                                ok++;
+                            } else if (tables.items[j].rowCount > 0) {
+                                failIdx.push(j);
+                            }
+                        }
+                        if (failIdx.length === 0) {
+                            statusEl.textContent = '完成：共 ' + total + ' 个，已设置 ' + ok + ' 个';
+                        } else {
+                            statusEl.textContent = 'API 设置 ' + ok + '/' + total + '，' + failIdx.length + ' 个未生效，正用 OOXML 重试...';
+                            fixTableOoxml(failIdx, 0);
+                        }
+                    });
+                });
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '设置失败: ' + error.message;
+        });
+    }
+
+    // --- OOXML 兜底：str 级别改首行加 <w:tblHeader/> ---
+    function addTblHeader(xml) {
+        if (!xml) return null;
+        // 找第一个 <w:tr
+        var mTr = xml.match(/<w:tr[\s>]/);
+        if (!mTr) return null;
+        var pos = mTr.index;
+        // 找这个 tr 的闭合标签 </w:tr>
+        var tail = xml.substring(pos);
+        var mEnd = tail.match(/<\/w:tr>/);
+        if (!mEnd) return null;
+        var row = tail.substring(0, mEnd.index + mEnd[0].length);
+
+        // 已有 tblHeader 则跳过
+        if (/<w:tblHeader/.test(row)) return null;
+
+        // 找行内已有的 <w:trPr>...</w:trPr>
+        var mPr = row.match(/<w:trPr[^>]*>[\s\S]*?<\/w:trPr>/);
+        if (mPr) {
+            // 在 </w:trPr> 前插 <w:tblHeader/>
+            var prEnd = pos + mPr.index + mPr[0].length - '</w:trPr>'.length;
+            return xml.slice(0, prEnd) + '<w:tblHeader/>' + xml.slice(prEnd);
+        }
+        // 没有 trPr → 新建一套
+        var gt = row.indexOf('>');
+        if (gt < 0) return null;
+        var ins = pos + gt + 1;
+        return xml.slice(0, ins) + '<w:trPr><w:tblHeader/></w:trPr>' + xml.slice(ins);
+    }
+
+    function fixTableOoxml(failIdx, i) {
+        if (i >= failIdx.length) {
+            statusEl.textContent = 'OOXML 处理完成（已尝试重新写入未生效的表格）';
+            return;
+        }
+        var tidx = failIdx[i];
+        statusEl.textContent = 'OOXML 重试 ' + (i + 1) + '/' + failIdx.length + '（表格 ' + (tidx + 1) + '）...';
+        Word.run(function(context) {
+            var tbls = context.document.body.tables;
+            tbls.load('items');
+            return context.sync().then(function() {
+                if (tidx >= tbls.items.length) {
+                    fixTableOoxml(failIdx, i + 1);
+                    return;
+                }
+                var rng = tbls.items[tidx].getRange();
+                return context.sync().then(function() {
+                    var ooxml = rng.getOoxml();
+                    return context.sync().then(function() {
+                        var xml = ooxml.value;
+                        var mod = addTblHeader(xml);
+                        if (!mod) {
+                            fixTableOoxml(failIdx, i + 1);
+                            return;
+                        }
+                        rng.insertOoxml(mod, 'Replace');
+                        return context.sync().then(function() {
+                            fixTableOoxml(failIdx, i + 1);
+                        });
+                    });
+                });
+            });
+        }).catch(function(e) {
+            console.error('OOXML table ' + tidx + ' error: ' + e);
+            fixTableOoxml(failIdx, i + 1);
+        });
+    }
+
+    // ============================================================
+    // === 多文档处理（JSZip 离线改 XML） ===
+    // ============================================================
+    function doExecuteMultiple(op) {
+        if (selectedFiles.length === 0) {
+            statusEl.textContent = '请先选择文件夹';
+            return;
+        }
+        if (typeof JSZip === 'undefined') {
+            statusEl.textContent = 'JSZip 未加载，请刷新页面重试';
+            return;
+        }
+
+        statusEl.textContent = '正在处理 ' + selectedFiles.length + ' 个文件...';
+        showProgress(0);
+
+        var total = selectedFiles.length;
+        var processed = [];
+        var idx = 0;
+
+        function processNext() {
+            if (idx >= total) {
+                finishMultiple(processed);
+                return;
+            }
+            var file = selectedFiles[idx];
+            statusEl.textContent = '正在处理 (' + (idx + 1) + '/' + total + '): ' + file.name;
+            showProgress(Math.round((idx / total) * 100));
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                processOneDocx(e.target.result, file.name, op).then(function(result) {
+                    processed.push({ name: file.name, data: result, changed: true });
+                    idx++;
+                    setTimeout(processNext, 50);
+                }).catch(function(err) {
+                    processed.push({ name: file.name, data: null, changed: false, error: err.message });
+                    idx++;
+                    setTimeout(processNext, 50);
+                });
+            };
+            reader.onerror = function() {
+                processed.push({ name: file.name, data: null, changed: false, error: '读取失败' });
+                idx++;
+                setTimeout(processNext, 50);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        processNext();
+    }
+
+    function processOneDocx(arrayBuffer, fileName, op) {
+        return JSZip.loadAsync(arrayBuffer).then(function(zip) {
+            var docPath = 'word/document.xml';
+            return zip.file(docPath).async('string').then(function(xmlStr) {
+                if (!xmlStr) return arrayBuffer;
+                var modified = patchDocumentXml(xmlStr, op);
+                if (modified === xmlStr) return arrayBuffer;
+                zip.file(docPath, modified);
+                return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+            });
+        });
+    }
+
+    // --- 修改 document.xml 中所有表格的首行（字符串方式，不丢命名空间）---
+    function patchDocumentXml(xml, op) {
+        if (op !== 'headerRow') return xml;
+        // 逐表提取 → 修改 → 拼接回去
+        var result = xml;
+        var cursor = 0;
+        while (true) {
+            var tblStart = result.indexOf('<w:tbl', cursor);
+            if (tblStart === -1) break;
+            // 找到这个 tbl 的闭合标签（注意嵌套情况极少，简单匹配）
+            var depth = 0,
+                tblEnd = -1;
+            var tmp = tblStart;
+            while (tmp < result.length) {
+                var open = result.indexOf('<w:tbl', tmp);
+                var close = result.indexOf('</w:tbl>', tmp);
+                if (close === -1) break;
+                if (open !== -1 && open < close) {
+                    depth++;
+                    tmp = open + 1;
+                } else {
+                    depth--;
+                    tmp = close + 1;
+                    if (depth === 0) {
+                        tblEnd = close + '</w:tbl>'.length;
+                        break;
+                    }
+                }
+            }
+            if (tblEnd === -1) { cursor = result.length; break; }
+
+            var tableXml = result.substring(tblStart, tblEnd);
+            var modified = addTblHeader(tableXml);
+            if (modified && modified !== tableXml) {
+                result = result.substring(0, tblStart) + modified + result.substring(tblEnd);
+                cursor = tblStart + modified.length;
+            } else {
+                cursor = tblEnd;
+            }
+        }
+        return result;
+    }
+
+    function finishMultiple(processed) {
+        showProgress(100);
+        var changed = [];
+        var errors = [];
+        for (var i = 0; i < processed.length; i++) {
+            if (processed[i].changed && processed[i].data) changed.push(processed[i]);
+            if (!processed[i].changed) errors.push(processed[i]);
+        }
+
+        if (changed.length === 0) {
+            statusEl.textContent = '处理完成，但未能修改任何文件。共处理 ' + processed.length + ' 个文件。';
+            hideProgress();
+            return;
+        }
+
+        statusEl.textContent = '正在打包下载...';
+
+        if (changed.length === 1) {
+            var blob = new Blob([changed[0].data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            triggerDownload(blob, changed[0].name);
+            statusEl.textContent = '处理完成：1 个文件已下载（表格首行已设置）';
+        } else {
+            var outZip = new JSZip();
+            for (var i = 0; i < changed.length; i++) {
+                outZip.file(changed[i].name, changed[i].data);
+            }
+            outZip.generateAsync({ type: 'blob', compression: 'DEFLATE' }).then(function(content) {
+                triggerDownload(content, '表格批量设置结果.zip');
+                statusEl.textContent = '处理完成：' + changed.length + ' 个文件已打包下载';
+            });
+        }
+        hideProgress();
+    }
+
+    function triggerDownload(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    function showProgress(pct) {
+        $('progressBar').style.display = 'block';
+        $('progressFill').style.width = pct + '%';
+    }
+
+    function hideProgress() {
+        setTimeout(function() {
+            $('progressBar').style.display = 'none';
+            $('progressFill').style.width = '0%';
+        }, 2000);
+    }
+
+    Office.onReady(function(info) {
+        initUI();
+        if (info.host !== Office.HostType.Word) {
+            statusEl.textContent = '请在 Word 中使用';
+        }
+    });
+    </script>
+</body>
+</html>

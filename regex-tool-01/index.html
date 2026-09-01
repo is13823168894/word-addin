@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>正则工具</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 10px; margin: 0; }
+        p { margin: 8px 0 4px 0; font-size: 13px; }
+        button { padding: 8px 16px; margin-right: 6px; cursor: pointer; border-radius: 4px; border: none; font-size: 12px; }
+        input { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: Consolas, monospace; }
+        #regexFindBtn, #regexSelectAllBtn, #regexPrevBtn, #regexNextBtn { background: white; border: 1px solid #2b579a; color: #2b579a; }
+        #regexFindBtn:hover, #regexSelectAllBtn:hover, #regexPrevBtn:hover, #regexNextBtn:hover { background: #2b579a; color: white; }
+        #regexReplaceBtn { background: white; border: 1px solid #e65100; color: #e65100; }
+        #regexReplaceBtn:hover { background: #e65100; color: white; }
+        #statusText { color: #2b579a; font-size: 12px; margin-top: 8px; }
+        #regexResultArea { margin-top: 8px; max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; }
+        #regexResultTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+        #regexResultTable th { background: #2b579a; color: #fff; padding: 5px; text-align: left; font-weight: normal; }
+        #regexResultTable td { padding: 4px 5px; border-bottom: 1px solid #eee; }
+        #regexResultTable tbody tr:hover { background: #f0f7ff; cursor: pointer; }
+        #regexResultTable tbody tr.selected { background: #2b579a !important; color: #fff; }
+        #regexResultTable tbody tr.replaced { text-decoration: line-through; color: #999; }
+        .range-radios { font-size: 12px; margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+        .range-radios label { display: inline-flex; align-items: center; cursor: pointer; white-space: nowrap; }
+        .range-radios input[type="radio"] { margin-right: 4px; margin-left: 0; vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <p><b>范围设置</b></p>
+    <div class="range-radios">
+        <label><input type="radio" name="regexRange" value="all" checked> 全主文档</label>
+        <label><input type="radio" name="regexRange" value="page"> 当前页面</label>
+        <label><input type="radio" name="regexRange" value="paragraph"> 当前段落</label>
+        <label><input type="radio" name="regexRange" value="selection"> 选择区域</label>
+    </div>
+
+    <p><b>正则表达式</b></p>
+    <input id="regexPattern" placeholder="例如：\d+" />
+
+    <p><b>替换为</b></p>
+    <input id="regexReplace" placeholder="支持 $1 $2 等捕获组" />
+
+    <br><br>
+    <button id="regexFindBtn">查找</button>
+    <button id="regexReplaceBtn">谨慎替换</button>
+    <button id="regexSelectAllBtn">全选</button>
+    <button id="regexPrevBtn">上一项</button>
+    <button id="regexNextBtn">下一项</button>
+
+    <div id="regexResultArea">
+        <table id="regexResultTable">
+            <thead>
+                <tr>
+                    <th style="width:35px;">序号</th>
+                    <th>匹配内容</th>
+                    <th>替换内容</th>
+                </tr>
+            </thead>
+            <tbody id="regexResultBody">
+                <tr><td colspan="3" style="padding:15px;text-align:center;color:#999;">请输入正则表达式后点击"查找"</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p id="statusText">就绪</p>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    var statusEl;
+    var regexState = { matches: [], currentIndex: -1, isReplaced: [] };
+
+    function getRangeType() {
+        var radios = document.getElementsByName('regexRange');
+        for (var i = 0; i < radios.length; i++) { if (radios[i].checked) return radios[i].value; }
+        return 'all';
+    }
+
+    function getSearchArea(context) {
+        var rangeType = getRangeType();
+        if (rangeType === 'all') {
+            return context.document.body;
+        }
+        return context.document.getSelection();
+    }
+
+    function doRegexFind() {
+        var pattern = document.getElementById('regexPattern').value;
+        if (!pattern) { statusEl.textContent = '请输入正则'; return; }
+        localStorage.setItem('regex_pattern', pattern);
+        localStorage.setItem('regex_replace', document.getElementById('regexReplace').value);
+        var regex;
+        try { regex = new RegExp(pattern, 'g'); }
+        catch (e) { statusEl.textContent = '正则错误: ' + e.message; return; }
+        var rangeType = getRangeType();
+        statusEl.textContent = '搜索中...';
+        regexState.matches = [];
+        regexState.currentIndex = -1;
+        regexState.isReplaced = [];
+        Word.run(function(context) {
+            var paragraphs;
+            var allParagraphs;
+            var selIndex = -1;
+            if (rangeType === 'page') {
+                allParagraphs = context.document.body.paragraphs;
+                allParagraphs.load('text');
+                var selection = context.document.getSelection();
+                var selParagraphs = selection.paragraphs;
+                selParagraphs.load('text');
+                return context.sync().then(function() {
+                    if (selParagraphs.items.length > 0) {
+                        var selText = selParagraphs.items[0].text;
+                        for (var i = 0; i < allParagraphs.items.length; i++) {
+                            if (allParagraphs.items[i].text === selText) {
+                                selIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                    if (selIndex < 0) {
+                        statusEl.textContent = '无法定位当前页面';
+                        showResults();
+                        return;
+                    }
+                    var start = Math.max(0, selIndex - 10);
+                    var end = Math.min(allParagraphs.items.length, selIndex + 10);
+                    var all = [];
+                    var matchCounters = {};
+                    for (var p = start; p < end; p++) {
+                        var text = allParagraphs.items[p].text;
+                        var m;
+                        regex.lastIndex = 0;
+                        while ((m = regex.exec(text)) !== null) {
+                            var key = p + '_' + m[0];
+                            var count = matchCounters[key] || 0;
+                            all.push({ paraIndex: p, paraText: text, matchInParaIndex: count, matchText: m[0], groups: m.slice(1) });
+                            matchCounters[key] = count + 1;
+                            if (m.index === regex.lastIndex) regex.lastIndex++;
+                        }
+                    }
+                    regexState.matches = all;
+                    regexState.isReplaced = [];
+                    for (var r = 0; r < all.length; r++) regexState.isReplaced[r] = false;
+                    showResults();
+                    statusEl.textContent = '找到 ' + all.length + ' 处';
+                });
+            } else if (rangeType === 'paragraph') {
+                allParagraphs = context.document.body.paragraphs;
+                allParagraphs.load('text');
+                var selPara = context.document.getSelection().paragraphs;
+                selPara.load('text');
+                return context.sync().then(function() {
+                    var paraIdx = -1;
+                    if (selPara.items.length > 0) {
+                        var selText = selPara.items[0].text;
+                        for (var i = 0; i < allParagraphs.items.length; i++) {
+                            if (allParagraphs.items[i].text === selText) {
+                                paraIdx = i;
+                                break;
+                            }
+                        }
+                    }
+                    if (paraIdx < 0) {
+                        statusEl.textContent = '无法定位当前段落';
+                        showResults();
+                        return;
+                    }
+                    var all = [];
+                    var matchCounters = {};
+                    var text = allParagraphs.items[paraIdx].text;
+                    var m;
+                    regex.lastIndex = 0;
+                    while ((m = regex.exec(text)) !== null) {
+                        var key = paraIdx + '_' + m[0];
+                        var count = matchCounters[key] || 0;
+                        all.push({ paraIndex: paraIdx, paraText: text, matchInParaIndex: count, matchText: m[0], groups: m.slice(1) });
+                        matchCounters[key] = count + 1;
+                        if (m.index === regex.lastIndex) regex.lastIndex++;
+                    }
+                    regexState.matches = all;
+                    regexState.isReplaced = [];
+                    for (var r = 0; r < all.length; r++) regexState.isReplaced[r] = false;
+                    showResults();
+                    statusEl.textContent = '找到 ' + all.length + ' 处';
+                });
+            } else {
+                paragraphs = getSearchArea(context).paragraphs;
+                paragraphs.load('text');
+                var bodyParagraphsSel = context.document.body.paragraphs;
+                bodyParagraphsSel.load('text');
+                return context.sync().then(function() {
+                    var all = [];
+                    var matchCounters = {};
+                    for (var p = 0; p < paragraphs.items.length; p++) {
+                        var text = paragraphs.items[p].text;
+                        var globalIdx = p;
+                        if (rangeType === 'selection') {
+                            globalIdx = -1;
+                            for (var i = 0; i < bodyParagraphsSel.items.length; i++) {
+                                if (bodyParagraphsSel.items[i].text === text) {
+                                    globalIdx = i;
+                                    break;
+                                }
+                            }
+                            if (globalIdx < 0) globalIdx = p;
+                        }
+                        var m;
+                        regex.lastIndex = 0;
+                        while ((m = regex.exec(text)) !== null) {
+                            var key = globalIdx + '_' + m[0];
+                            var count = matchCounters[key] || 0;
+                            all.push({ paraIndex: globalIdx, paraText: text, matchInParaIndex: count, matchText: m[0], groups: m.slice(1) });
+                            matchCounters[key] = count + 1;
+                            if (m.index === regex.lastIndex) regex.lastIndex++;
+                        }
+                    }
+                    regexState.matches = all;
+                    regexState.isReplaced = [];
+                    for (var r = 0; r < all.length; r++) regexState.isReplaced[r] = false;
+                    showResults();
+                    statusEl.textContent = '找到 ' + all.length + ' 处';
+                });
+            }
+        }).catch(function(e) { statusEl.textContent = '搜索失败: ' + e.message; });
+    }
+
+    function showResults() {
+        var tbody = document.getElementById('regexResultBody');
+        var replaceText = document.getElementById('regexReplace').value;
+        tbody.innerHTML = '';
+        if (regexState.matches.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="padding:15px;text-align:center;color:#999;">无匹配</td></tr>';
+            return;
+        }
+        for (var i = 0; i < regexState.matches.length; i++) {
+            var m = regexState.matches[i];
+            var tr = document.createElement('tr');
+            if (i === regexState.currentIndex) tr.className = 'selected';
+            if (regexState.isReplaced[i]) tr.className = (tr.className ? tr.className + ' ' : '') + 'replaced';
+            var preview = replaceText || '(无)';
+            for (var g = 0; g < m.groups.length; g++) { preview = preview.replace(new RegExp('\\$' + (g + 1), 'g'), m.groups[g] || ''); }
+            tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + esc(m.matchText) + '</td><td>' + esc(preview) + '</td>';
+            tr.onclick = (function(idx) { return function() { regexState.currentIndex = idx; showResults(); goTo(idx); }; })(i);
+            tbody.appendChild(tr);
+        }
+    }
+
+    function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+    function goTo(index) {
+        if (index < 0 || index >= regexState.matches.length) return;
+        var m = regexState.matches[index];
+        Word.run(function(context) {
+            var body = context.document.body;
+            var paragraphs = body.paragraphs;
+            paragraphs.load('text');
+            return context.sync().then(function() {
+                var targetPara = null;
+                if (m.paraIndex < paragraphs.items.length && paragraphs.items[m.paraIndex].text === m.paraText) {
+                    targetPara = paragraphs.items[m.paraIndex];
+                } else {
+                    for (var p = 0; p < paragraphs.items.length; p++) {
+                        if (paragraphs.items[p].text === m.paraText) {
+                            targetPara = paragraphs.items[p];
+                            break;
+                        }
+                    }
+                }
+                if (targetPara) {
+                    var sr = targetPara.search(m.matchText, { matchCase: true });
+                    sr.load('items');
+                    return context.sync().then(function() {
+                        var idx = m.matchInParaIndex || 0;
+                        if (idx < sr.items.length) {
+                            sr.items[idx].select();
+                        } else if (sr.items.length > 0) {
+                            sr.items[0].select();
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    function doRegexPrev() {
+        if (regexState.matches.length === 0) return;
+        regexState.currentIndex = (regexState.currentIndex - 1 + regexState.matches.length) % regexState.matches.length;
+        showResults();
+        goTo(regexState.currentIndex);
+    }
+
+    function doRegexNext() {
+        if (regexState.matches.length === 0) return;
+        regexState.currentIndex = (regexState.currentIndex + 1) % regexState.matches.length;
+        showResults();
+        goTo(regexState.currentIndex);
+    }
+
+    function doRegexSelectAll() {
+        if (regexState.matches.length === 0) { statusEl.textContent = '无匹配'; return; }
+        statusEl.textContent = '高亮中...';
+        Word.run(function(context) {
+            var body = context.document.body;
+            var paragraphs = body.paragraphs;
+            paragraphs.load('text');
+            return context.sync().then(function() {
+                var searches = [];
+                for (var i = 0; i < regexState.matches.length; i++) {
+                    var m = regexState.matches[i];
+                    var targetPara = null;
+                    if (m.paraIndex < paragraphs.items.length && paragraphs.items[m.paraIndex].text === m.paraText) {
+                        targetPara = paragraphs.items[m.paraIndex];
+                    } else {
+                        for (var p = 0; p < paragraphs.items.length; p++) {
+                            if (paragraphs.items[p].text === m.paraText) {
+                                targetPara = paragraphs.items[p];
+                                break;
+                            }
+                        }
+                    }
+                    if (targetPara) {
+                        var sr = targetPara.search(m.matchText, { matchCase: true });
+                        sr.load('items');
+                        searches.push({ sr: sr, idx: m.matchInParaIndex || 0 });
+                    }
+                }
+                return context.sync().then(function() {
+                    var count = 0;
+                    for (var i = 0; i < searches.length; i++) {
+                        var item = searches[i];
+                        if (item.idx < item.sr.items.length) {
+                            item.sr.items[item.idx].font.highlightColor = '#FFFF00';
+                            count++;
+                        }
+                    }
+                    return context.sync().then(function() {
+                        statusEl.textContent = '已高亮 ' + count + ' 处';
+                    });
+                });
+            });
+        });
+    }
+
+    function doRegexReplace() {
+        var pattern = document.getElementById('regexPattern').value;
+        var replaceText = document.getElementById('regexReplace').value;
+        if (!pattern || regexState.matches.length === 0) { statusEl.textContent = '请先查找'; return; }
+        statusEl.textContent = '替换中...';
+        function replaceOne(idx) {
+            if (idx < 0) { statusEl.textContent = '替换完成'; showResults(); return; }
+            var m = regexState.matches[idx];
+            var replacement = replaceText;
+            for (var g = 0; g < m.groups.length; g++) { replacement = replacement.replace(new RegExp('\\$' + (g + 1), 'g'), m.groups[g] || ''); }
+            Word.run(function(context) {
+                var body = context.document.body;
+                var paragraphs = body.paragraphs;
+                paragraphs.load('text');
+                return context.sync().then(function() {
+                    var targetPara = null;
+                    if (m.paraIndex < paragraphs.items.length && paragraphs.items[m.paraIndex].text === m.paraText) {
+                        targetPara = paragraphs.items[m.paraIndex];
+                    } else {
+                        for (var p = 0; p < paragraphs.items.length; p++) {
+                            if (paragraphs.items[p].text === m.paraText) {
+                                targetPara = paragraphs.items[p];
+                                break;
+                            }
+                        }
+                    }
+                    if (targetPara) {
+                        var sr = targetPara.search(m.matchText, { matchCase: true });
+                        sr.load('items');
+                        return context.sync().then(function() {
+                            var matchIdx = m.matchInParaIndex || 0;
+                            if (matchIdx < sr.items.length) {
+                                sr.items[matchIdx].insertText(replacement, Word.InsertLocation.replace);
+                                regexState.isReplaced[idx] = true;
+                            }
+                            replaceOne(idx - 1);
+                        });
+                    } else { replaceOne(idx - 1); }
+                });
+            });
+        }
+        replaceOne(regexState.matches.length - 1);
+    }
+
+    Office.onReady(function(info) {
+        statusEl = document.getElementById('statusText');
+
+        document.getElementById('regexFindBtn').onclick = doRegexFind;
+        document.getElementById('regexReplaceBtn').onclick = doRegexReplace;
+        document.getElementById('regexSelectAllBtn').onclick = doRegexSelectAll;
+        document.getElementById('regexPrevBtn').onclick = doRegexPrev;
+        document.getElementById('regexNextBtn').onclick = doRegexNext;
+
+        var savedPattern = localStorage.getItem('regex_pattern');
+        var savedReplace = localStorage.getItem('regex_replace');
+        if (savedPattern) document.getElementById('regexPattern').value = savedPattern;
+        if (savedReplace) document.getElementById('regexReplace').value = savedReplace;
+
+        if (info.host === Office.HostType.Word) {
+            statusEl.textContent = '就绪';
+        } else {
+            statusEl.textContent = '请在 Word 中使用';
+        }
+    });
+    </script>
+</body>
+</html>

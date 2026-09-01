@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>表格工作台 (Luckysheet)</title>
+<link rel='stylesheet' href='dist/plugins/css/pluginsCss.css'>
+<link rel='stylesheet' href='dist/plugins/plugins.css'>
+<link rel='stylesheet' href='dist/css/luckysheet.css'>
+<link rel='stylesheet' href='dist/assets/iconfont/iconfont.css'>
+<style>
+html,body{height:100%;margin:0;padding:0;overflow:hidden;}
+body{display:flex;flex-direction:column;font-family:"Microsoft YaHei",sans-serif;font-size:12px;color:#333;background:#fff;}
+.toolbar{padding:6px 8px;border-bottom:1px solid #ddd;background:#f3f3f3;display:flex;gap:5px;flex-wrap:wrap;align-items:center;flex-shrink:0;}
+.toolbar button{padding:5px 10px;font-size:12px;cursor:pointer;border:1px solid #bbb;border-radius:3px;background:#fff;color:#333;white-space:nowrap;line-height:1.2;}
+.toolbar button:hover{background:#e8e8e8;}
+.toolbar button:disabled{opacity:.5;cursor:not-allowed;}
+.toolbar button.accent{background:#2b579a;color:#fff;border-color:#2b579a;}
+.toolbar button.accent:hover{background:#1e3f6f;}
+.toolbar .sep{width:1px;background:#ccc;align-self:stretch;margin:0 4px;}
+.toolbar .hint{font-size:11px;color:#777;margin-left:6px;}
+#luckysheet-container{flex:1 1 auto;min-height:300px;position:relative;overflow:hidden;background:#fff;}
+.fallback{padding:30px 20px;text-align:center;color:#888;font-size:13px;line-height:1.8;}
+.fallback code{background:#f0f0f0;padding:1px 5px;border-radius:2px;font-family:Consolas,monospace;color:#c7254e;}
+.status{padding:5px 10px;border-top:1px solid #ddd;background:#f7f7f7;font-size:11px;color:#555;flex-shrink:0;min-height:22px;line-height:1.4;}
+.status.ok{color:#0a7a2a;}
+.status.err{color:#c0392b;}
+.status.working{color:#2b579a;}
+/* Luckysheet 适配：约束内置工具栏高度，避免撑满 */
+#luckysheet-container .luckysheet-info-detail{display:none !important;}
+/* 工具栏开关 */
+.toolbar .toggle{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#333;user-select:none;cursor:pointer;}
+.toolbar .toggle input{margin:0;cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="accent" id="btnImport" onclick="importWordTable()" title="读取 Word 文档当前表格，写入工作表">Word → 表</button>
+  <button id="btnImportCursor" onclick="importCursorTable()" title="导入光标所在或选区覆盖的那个 Word 表格，无需遍历文档全部表格">选中 → 表</button>
+  <button id="btnNext" onclick="importNextTable()" title="导入下一个 Word 表格">下一个 ›</button>
+  <button id="btnselectNext" onclick="selectNextTable()" title="跳转下一个 Word 表格（仅滚动定位，不导入）">跳下一个 ›</button>
+  <button class="accent" id="btnExport" onclick="exportToWord()" title="把工作表作为 Word 表格插入到光标位置">表 → Word</button>
+  <span class="sep"></span>
+  <button id="btnSample" onclick="loadSample()" title="加载示例数据，含 SUM / IF 公式">示例数据</button>
+  <button id="btnClearAll" onclick="clearAllSheets()" title="清除所有工作表数据并删除文档保存（下次打开为空白）">清除全部</button>
+  <span class="sep"></span>
+  <label class="toggle"><input type="checkbox" id="chkCursorPaste" onchange="toggleCursorPaste(this.checked)"> 从光标处粘贴</label>
+  <span class="hint">编辑/公式/图表/格式 请直接使用下方 Luckysheet 完整菜单。完成后点「表 → Word」写回文档</span>
+</div>
+
+<div id="luckysheet-container">
+  <div id="luckysheet" style="margin:0;padding:0;position:absolute;width:100%;height:100%;left:0;top:0;"></div>
+  <div class="fallback" id="loadingHint">正在加载 Luckysheet 电子表格组件…<br>如果长时间未加载，请检查本地库文件是否完整</div>
+</div>
+
+<div class="status" id="status">初始化中…</div>
+
+<script src="js/jquery.min.js"></script>
+<script src="dist/plugins/js/plugin.js"></script>
+<script src="dist/luckysheet.umd.js"></script>
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script>
+/* =====================================================
+   表格工作台 (Luckysheet 方案) - Word 加载项
+   电子表格组件: Luckysheet (MIT, Canvas 渲染, 类 Excel)
+   ===================================================== */
+
+var isReady = false;
+var _curTableIdx = -1;
+var _totalTables = 0;
+var _currentRow = 0;
+var _currentCol = 0;
+var _clearBeforePaste = true;   // true=导入时先清空  false=在光标处追加
+
+function setStatus(msg, type) {
+  var el = document.getElementById('status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'status' + (type ? (' ' + type) : '');
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function setReady(ready) {
+  isReady = ready;
+  var ids = ['btnImport','btnImportCursor','btnNext','btnselectNext','btnExport','btnSample','btnClearAll'];
+  for (var i = 0; i < ids.length; i++) {
+    var b = document.getElementById(ids[i]);
+    if (b) b.disabled = !ready;
+  }
+}
+
+/* ============ 单元格值提取 ============ */
+/* Luckysheet 单元格可能为：null / 字符串 / 数字 / {v:值, m:显示值, ct:{...}} */
+function cellText(cell) {
+  if (cell === null || cell === undefined) return '';
+  if (typeof cell === 'object') {
+    if (cell.m != null) return String(cell.m);
+    if (cell.v != null) return String(cell.v);
+    return '';
+  }
+  return String(cell);
+}
+
+/* ============ 工作表 → 2D 字符串数组 ============ */
+function getSheetData2D() {
+  var data = luckysheet.getSheetData();
+  if (!data || !data.length) return { rows: [], maxR: -1, maxC: -1 };
+
+  var maxC = 0;
+  for (var r = 0; r < data.length; r++) {
+    if (data[r] && data[r].length > maxC) maxC = data[r].length;
+  }
+
+  var rows2d = [];
+  for (var r = 0; r < data.length; r++) {
+    var arr = [];
+    var row = data[r];
+    for (var c = 0; c < maxC; c++) {
+      arr.push(cellText(row ? row[c] : null));
+    }
+    rows2d.push(arr);
+  }
+
+  return { rows: rows2d, maxR: data.length - 1, maxC: maxC - 1 };
+}
+
+/* ============ 2D 数组 → 工作表 ============ */
+/* data2d: 二维数组; startRow/startCol: 起始单元格(缺省自动取当前选中单元格) */
+function loadDataIntoSheet(data2d, startRow, startCol) {
+  if (!isReady) return;
+  if (!data2d || data2d.length === 0) return;
+
+  /* 1) 起点：优先用传入值，否则取当前选中单元格(本版本无 cellSelected 事件，改用内部 store) */
+  if (startRow === undefined || startCol === undefined) {
+    try {
+      if (luckysheet.getluckysheet_select_save) {
+        var sv = luckysheet.getluckysheet_select_save();
+        // getluckysheet_select_save 返回数组：[{row:[r1,r2], column:[c1,c2]}]
+        if (sv && sv.length && sv[0].row && sv[0].row.length && sv[0].column && sv[0].column.length) {
+          startRow = sv[0].row[0];
+          startCol = sv[0].column[0];
+        }
+      }
+    } catch (e) {}
+  }
+  if (startRow === undefined) startRow = 0;
+  if (startCol === undefined) startCol = 0;
+
+  /* 2) 取当前数据(二维对象数组) */
+  var oldData = luckysheet.getSheetData() || [];
+  var oldRows = oldData.length;
+  var oldCols = 0;
+  for (var r = 0; r < oldRows; r++) {
+    if (oldData[r] && oldData[r].length > oldCols) oldCols = oldData[r].length;
+  }
+
+  var rows = data2d.length;
+  var cols = 0;
+  for (var r2 = 0; r2 < rows; r2++) {
+    if (data2d[r2] && data2d[r2].length > cols) cols = data2d[r2].length;
+  }
+
+  /* 3) 目标矩阵大小 = 起点偏移 + 新数据；导入模式清空时起点从 0 开始 */
+  var baseRow = _clearBeforePaste ? 0 : startRow;
+  var baseCol = _clearBeforePaste ? 0 : startCol;
+  var needRows = baseRow + rows;
+  var needCols = baseCol + cols;
+
+  var totalRows = Math.max(oldRows, needRows, 100);
+  var totalCols = Math.max(oldCols, needCols, 26);
+
+  /* 4) 构建新数据矩阵(用 [] 初始化空白，jfrefreshgrid 会正确渲染) */
+  var newData = new Array(totalRows);
+  for (var i = 0; i < totalRows; i++) {
+    newData[i] = new Array(totalCols);
+  }
+
+  /* 5) 复制旧数据(导入模式只保留起点之后的，避免脏数据) */
+  if (_clearBeforePaste) {
+    // 仅保留 baseRow/baseCol 之后的原有内容(实际通常为空)，这里整体清空更直观
+  } else {
+    for (var i = 0; i < oldRows; i++) {
+      if (!oldData[i]) continue;
+      for (var j = 0; j < oldData[i].length; j++) {
+        newData[i][j] = oldData[i][j];
+      }
+    }
+  }
+
+  /* 6) 写入新数据 */
+  for (var i = 0; i < rows; i++) {
+    if (!data2d[i]) continue;
+    var tr = baseRow + i;
+    for (var j = 0; j < data2d[i].length; j++) {
+      var cell = data2d[i][j];
+      if (cell === null || cell === undefined) continue;
+      var v = (typeof cell === 'object' && cell.v !== undefined) ? cell.v : cell;
+      if (v === '' || v === null || v === undefined) continue;
+      newData[tr][baseCol + j] = { v: v, m: String(v) };
+    }
+  }
+
+  /* 7) 一次性刷新(比逐格 setCellValue 快很多) */
+  try {
+    luckysheet.jfrefreshgrid(newData, [{ row: [0, totalRows - 1], column: [0, totalCols - 1] }]);
+  } catch (e) {
+    // 兜底：逐格写入
+    for (var i = 0; i < totalRows; i++) {
+      for (var j = 0; j < totalCols; j++) {
+        try { luckysheet.setCellValue(i, j, newData[i][j] || ''); } catch (e2) {}
+      }
+    }
+  }
+}
+
+/* ============ 持久化：文档 Settings ============ */
+function saveToDocument() {
+  if (!isReady) return;
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document || !Office.context.document.settings) return;
+  try {
+    var data = luckysheet.getSheetData();
+    if (!data || data.length === 0) return;
+    var json = JSON.stringify(data);
+    Office.context.document.settings.set('luckysheetData', json);
+    Office.context.document.settings.saveAsync(function(asyncResult) {
+      if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+        // 静默处理：可能数据太大或 settings 不可用
+      }
+    });
+  } catch (e) {}
+}
+
+function loadFromDocument() {
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document || !Office.context.document.settings) return null;
+  try {
+    var json = Office.context.document.settings.get('luckysheetData');
+    if (!json) return null;
+    var data = JSON.parse(json);
+    var hasContent = false;
+    if (data && data.length > 0) {
+      for (var i = 0; i < data.length; i++) {
+        if (data[i] && data[i].length > 0) {
+          for (var j = 0; j < data[i].length; j++) {
+            if (data[i][j] !== null && data[i][j] !== undefined && data[i][j] !== '') { hasContent = true; break; }
+          }
+        }
+        if (hasContent) break;
+      }
+    }
+    return hasContent ? data : null;
+  } catch (e) { return null; }
+}
+
+function clearAllSheets() {
+  if (!isReady) { setStatus('表格未就绪', 'err'); return; }
+  // 清空单元格
+  try {
+    var cur = luckysheet.getSheetData();
+    if (cur && cur.length > 0) {
+      for (var i = 0; i < cur.length; i++) {
+        if (!cur[i]) continue;
+        for (var j = 0; j < cur[i].length; j++) {
+          try { luckysheet.setCellValue(i, j, ''); } catch (e2) {}
+        }
+      }
+    }
+  } catch (e) {}
+  // 删除文档保存
+  if (typeof Office !== 'undefined' && Office.context && Office.context.document && Office.context.document.settings) {
+    try {
+      Office.context.document.settings.remove('luckysheetData');
+      Office.context.document.settings.saveAsync(function(ar) {
+        if (ar.status === Office.AsyncResultStatus.Succeeded) {
+          setStatus('已清除全部数据并删除文档保存（下次打开为空白）', 'ok');
+        } else {
+          setStatus('已清除数据（文档保存删除失败）', 'err');
+        }
+      });
+    } catch (e2) {
+      setStatus('已清除数据（文档保存删除失败）', 'err');
+    }
+  } else {
+    setStatus('已清除全部数据（当前不在 Word 环境）', 'ok');
+  }
+}
+
+function autoSave() {
+  // 延迟保存，避免频繁调用；连续调用只执行最后一次
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(function() { saveToDocument(); }, 500);
+}
+var _saveTimer = null;
+
+/* ============ 示例数据 ============ */
+function toggleCursorPaste(checked) {
+  _clearBeforePaste = !checked;   // 勾选=从光标处粘贴(不清空)；不勾选=导入即清空替换
+  setStatus(checked ? '已开启：导入从光标所在单元格开始粘贴' : '已关闭：导入将先清空工作表再写入', 'ok');
+}
+function loadSample() {
+  if (!isReady) { setStatus('表格未就绪', 'err'); return; }
+  var sample = [
+    ['产品', '数量', '单价', '金额', '校验'],
+    ['A', 10, 50, '=B2*C2', '=IF(D2>400,"通过","未达")'],
+    ['B', 5, 200, '=B3*C3', '=IF(D3>400,"通过","未达")'],
+    ['C', 3, 800, '=B4*C4', '=IF(D4>400,"通过","未达")'],
+    ['合计', '=SUM(B2:B4)', '', '=SUM(D2:D4)', '=COUNTIF(E2:E4,"通过")&" 项通过"']
+  ];
+  loadDataIntoSheet(sample);
+  autoSave();
+  setStatus('已加载示例：5 行 × 5 列，含 SUM / IF / COUNTIF 公式', 'ok');
+}
+
+/* ============ Word → 工作表：导入 Word 表格 ============ */
+function importWordTable() {
+  if (!isReady) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  setStatus('正在读取 Word 表格…', 'working');
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    return ctx.sync().then(function() {
+      if (!tables.items || tables.items.length === 0) {
+        setStatus('文档中没有表格，请先把内容做成 Word 表格', 'err');
+        return;
+      }
+      _totalTables = tables.items.length;
+      _curTableIdx = 0;
+      var tbl = tables.items[0];
+      tbl.load('values');
+      return ctx.sync().then(function() {
+        var data2d = tbl.values;
+        if (!data2d || data2d.length === 0) {
+          setStatus('第 1 个表格为空', 'err');
+          return;
+        }
+        
+        loadDataIntoSheet(data2d);
+        autoSave();
+        var cols = data2d[0] ? data2d[0].length : 0;
+        setStatus('已导入第 1 / ' + tables.items.length + ' 个表格：'
+          + data2d.length + ' 行 × ' + cols + ' 列（点「下一个 ›」继续）', 'ok');
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + err.message, 'err');
+  });
+}
+
+function importNextTable() {
+  if (!isReady) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  if (_totalTables === 0) {
+    setStatus('请先点「Word → 表」初始化表格列表', 'err');
+    return;
+  }
+  var nextIdx = _curTableIdx + 1;
+  if (nextIdx >= _totalTables) {
+    setStatus('已是最后一个表格（第 ' + _totalTables + ' 个）', 'err');
+    return;
+  }
+  setStatus('正在读取第 ' + (nextIdx + 1) + ' / ' + _totalTables + ' 个表格…', 'working');
+  Word.run(function(ctx) {
+    var tables = ctx.document.body.tables;
+    tables.load('items');
+    return ctx.sync().then(function() {
+      var tbl = tables.items[nextIdx];
+      tbl.load('values');
+      return ctx.sync().then(function() {
+        var data2d = tbl.values;
+        if (!data2d || data2d.length === 0) {
+          setStatus('第 ' + (nextIdx + 1) + ' 个表格为空', 'err');
+          return;
+        }
+        
+        loadDataIntoSheet(data2d);
+        autoSave();
+        _curTableIdx = nextIdx;
+        var cols = data2d[0] ? data2d[0].length : 0;
+        setStatus('已导入第 ' + (nextIdx + 1) + ' / ' + tables.items.length
+          + ' 个表格：' + data2d.length + ' 行 × ' + cols + ' 列', 'ok');
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + err.message, 'err');
+  });
+}
+
+/* ============ Word → 工作表：导入光标所在/选中的表格 ============ */
+/* 辅助：拿到 table 对象后读取数据写入 Luckysheet */
+function _loadTableData(tbl) {
+  tbl.load('values');
+  return tbl.context.sync().then(function() {
+    var data2d = tbl.values;
+    if (!data2d || data2d.length === 0) {
+      setStatus('该表格为空', 'err');
+      return;
+    }
+    loadDataIntoSheet(data2d);
+    autoSave();
+    var cols = data2d[0] ? data2d[0].length : 0;
+    setStatus('已按选区导入：' + data2d.length + ' 行 × ' + cols + ' 列', 'ok');
+  });
+}
+
+function importCursorTable() {
+  if (!isReady) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  setStatus('正在读取光标所在/选中的表格…', 'working');
+  Word.run(function(ctx) {
+    var sel = ctx.document.getSelection();
+    var selTables = sel.tables;
+    selTables.load('items');
+    return ctx.sync().then(function() {
+      var items = selTables.items;
+
+      /* 情况 A：选区直接覆盖到了表格（拖动选中了表格单元格 / 全选表格） */
+      if (items && items.length > 0) {
+        if (items.length > 1) {
+          var total = items.length;
+          setStatus('选区跨 ' + total + ' 个表格，按第一个表格导入（共 ' + total + ' 个）；若需其它表格请按位置重新选', 'working');
+        }
+        return _loadTableData(items[0]);
+      }
+
+      /* 情况 B：光标只是插入点放在表格里（没有划选区）→ 通过段落父级表格查找 */
+      var selParas = sel.paragraphs;
+      selParas.load('items');
+      return ctx.sync().then(function() {
+        var paras = selParas.items;
+        if (!paras || paras.length === 0) {
+          setStatus('未检测到表格：请把光标放进表格单元里，或用鼠标拖动选区覆盖表格的若干格', 'err');
+          return;
+        }
+        var firstPara = paras[0];
+        firstPara.load('parentTable');
+        return ctx.sync().then(function() {
+          var parentTbl = firstPara.parentTable;
+          if (!parentTbl) {
+            setStatus('光标不在表格中。请先点入 Word 表格的任意单元格', 'err');
+            return;
+          }
+          return _loadTableData(parentTbl);
+        });
+      });
+    });
+  }).catch(function(err) {
+    setStatus('导入失败：' + (err.message || err), 'err');
+  });
+}
+
+/* ============ 工作表 → Word：导出 ============ */
+function exportToWord() {
+  if (!isReady) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+
+  setStatus('正在生成 Word 表格…', 'working');
+
+  try {
+    var info = getSheetData2D();
+
+    if (info.maxR < 0) {
+      setStatus('表格为空，无法导出。请先填入数据或加载示例。', 'err');
+      return;
+    }
+
+    var html = '<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:宋体;font-size:11pt;">';
+    for (var r = 0; r <= info.maxR; r++) {
+      html += '<tr>';
+      for (var c = 0; c <= info.maxC; c++) {
+        var text = info.rows[r][c] || '';
+        var cellHtml = escHtml(text).replace(/\r?\n/g, '<br>');
+        if (r === 0) {
+          html += '<td style="border:1px solid #888;padding:4px;background:#f0f0f0;font-weight:bold;">' + cellHtml + '</td>';
+        } else {
+          html += '<td style="border:1px solid #888;padding:4px;">' + cellHtml + '</td>';
+        }
+      }
+      html += '</tr>';
+    }
+    html += '</table><p></p>';
+
+    Word.run(function(ctx) {
+      var sel = ctx.document.getSelection();
+      sel.insertHtml(html, Word.InsertLocation.replace);
+      return ctx.sync().then(function() {
+        setStatus('已导出 ' + (info.maxR + 1) + ' 行 × ' + (info.maxC + 1) + ' 列到 Word（光标位置）', 'ok');
+      });
+    }).catch(function(err) {
+      setStatus('导出失败：' + err.message, 'err');
+    });
+  } catch (e) {
+    setStatus('导出失败：' + e.message, 'err');
+  }
+}
+
+/* ============ 跳下一个 Word 表格（仅定位选中，不导入数据） ============ */
+function selectNextTable() {
+  if (!isReady) { setStatus('表格未就绪', 'err'); return; }
+  if (typeof Word === 'undefined') { setStatus('当前不在 Word 环境', 'err'); return; }
+  setStatus('正在跳转到下一个表格…', 'working');
+  Word.run(function(context) {
+    var tables = context.document.body.tables;
+    tables.load('items');
+    return context.sync().then(function() {
+      if (!tables.items || tables.items.length === 0) {
+        setStatus('文档中没有表格', 'err');
+        return;
+      }
+      var selection = context.document.getSelection();
+      selection.load('tables');
+      return context.sync().then(function() {
+        var currentIndex = -1;
+        if (selection.tables.items.length > 0) {
+          var currentTable = selection.tables.items[0];
+          currentTable.load('index');
+          return context.sync().then(function() {
+            currentIndex = currentTable.index;
+            return _doSelectNext(context, tables, currentIndex);
+          });
+        } else {
+          return _doSelectNext(context, tables, currentIndex);
+        }
+      });
+    });
+  }).catch(function(err) {
+    setStatus('跳转失败：' + (err.message || err), 'err');
+  });
+}
+
+function _doSelectNext(context, tables, currentIndex) {
+  if (currentIndex + 1 < tables.items.length) {
+    var nextTable = tables.items[currentIndex + 1];
+    nextTable.select();
+    return context.sync().then(function() {
+      setStatus('已跳转到第 ' + (currentIndex + 2) + ' / ' + tables.items.length + ' 个表格', 'ok');
+    });
+  } else {
+    setStatus('已是最后一个表格（共 ' + tables.items.length + ' 个）', 'err');
+    return context.sync();
+  }
+}
+
+/* ============ 初始化 ============ */
+function initLuckysheet() {
+  try {
+    luckysheet.create({
+      container: 'luckysheet',
+      lang: 'zh',
+      title: '表格工作台',
+      showtoolbar: true,
+      showinfobar: false,
+      showstatisticBar: true,
+      allowUpdate: true,
+      data: [{
+        name: 'Sheet1',
+        index: 0,
+        status: 1,
+        order: 0,
+        data: [],
+        config: {}
+      }]
+    });
+
+    var hint = document.getElementById('loadingHint');
+    if (hint) hint.style.display = 'none';
+
+    setReady(true);
+    setStatus('就绪', 'ok');
+
+    // 自动恢复上次保存的数据
+    var saved = loadFromDocument();
+    if (saved) {
+      setTimeout(function() {
+        try {
+          loadDataIntoSheet(saved);
+          var rows = saved.length;
+          var cols = saved[0] ? saved[0].length : 0;
+          setStatus('已恢复上次保存：' + rows + ' 行 × ' + cols + ' 列', 'ok');
+        } catch (e2) {}
+      }, 600);
+    }
+  } catch (e) {
+    var container = document.getElementById('luckysheet-container');
+    if (container) {
+      container.innerHTML = '<div class="fallback"><p><strong>初始化失败</strong></p><p>' + escHtml(e.message) + '</p></div>';
+    }
+    setStatus('初始化失败: ' + e.message, 'err');
+  }
+}
+
+/* 等待 Luckysheet 加载就绪 */
+(function() {
+  var maxWait = 150;
+  var waitCount = 0;
+  function checkInit() {
+    waitCount++;
+    if (typeof luckysheet !== 'undefined' && typeof luckysheet.create === 'function') {
+      initLuckysheet();
+    } else if (waitCount < maxWait) {
+      setTimeout(checkInit, 200);
+    } else {
+      var container = document.getElementById('luckysheet-container');
+      if (container) {
+        container.innerHTML = '<div class="fallback">'
+          + '<p><strong>Luckysheet 组件加载超时</strong></p>'
+          + '<p>可能原因：</p>'
+          + '<p>1. 本地库文件加载失败</p>'
+          + '<p>2. 缺少必要的 JS/CSS 文件</p>'
+          + '<p>建议：检查 dist/ 目录下库文件是否完整</p></div>';
+      }
+      setStatus('组件加载超时', 'err');
+    }
+  }
+  checkInit();
+})();
+
+Office.onReady(function(info) {
+  if (isReady) setStatus('就绪（' + (info.host || 'Word') + '）', 'ok');
+});
+
+/* 页面关闭/隐藏时保存 */
+window.addEventListener('beforeunload', function() { saveToDocument(); });
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) saveToDocument();
+});
+</script>
+</body>
+</html>

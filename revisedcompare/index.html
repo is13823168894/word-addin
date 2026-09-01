@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>修订式粘贴</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; }
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            color: #333;
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        h3 { font-size: 15px; margin-bottom: 4px; color: #2b579a; flex-shrink: 0; }
+        .subtitle { font-size: 11px; color: #888; margin-bottom: 6px; flex-shrink: 0; }
+
+        #mainScroll {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            min-height: 0;
+            padding-right: 2px;
+        }
+        #mainScroll::-webkit-scrollbar { width: 6px; }
+        #mainScroll::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        #mainScroll::-webkit-scrollbar-track { background: transparent; }
+
+        .section {
+            background: #fff; border: 1px solid #e0e0e0;
+            border-radius: 6px; padding: 6px 10px; margin-bottom: 6px;
+        }
+        .section-label { font-weight: bold; font-size: 12px; color: #555; margin-bottom: 4px; }
+
+        .mode-list { display: flex; flex-direction: column; gap: 4px; }
+        .mode-item {
+            display: flex; align-items: flex-start; gap: 6px;
+            padding: 5px 8px; border: 1px solid #e0e0e0; border-radius: 4px;
+            cursor: pointer; transition: all 0.15s;
+        }
+        .mode-item:hover { border-color: #2b579a; background: #f8faff; }
+        .mode-item.active { border-color: #2b579a; background: #eef2f7; }
+        .mode-item input[type="radio"] { margin-top: 2px; cursor: pointer; }
+        .mode-text { flex: 1; }
+        .mode-name { font-weight: 600; font-size: 12px; color: #2b579a; }
+        .mode-desc { font-size: 11px; color: #888; margin-top: 1px; }
+
+        textarea {
+            width: 100%;
+            font-family: inherit; font-size: 13px; line-height: 1.6;
+            padding: 6px 8px; border: 1px solid #ccc;
+            border-radius: 4px; resize: vertical;
+            min-height: 100px;
+        }
+        textarea:focus { border-color: #2b579a; outline: none; }
+
+        .btn-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+        .btn {
+            padding: 5px 12px; border: none; border-radius: 4px;
+            cursor: pointer; font-size: 12px; font-family: inherit;
+            transition: background 0.15s;
+        }
+        .btn:disabled { background: #bbb !important; cursor: not-allowed; }
+        .btn-primary { background: #2b579a; color: #fff; }
+        .btn-primary:hover { background: #1a3d6b; }
+        .btn-ghost { background: #fff; color: #666; border: 1px solid #ccc; }
+        .btn-ghost:hover { background: #f0f0f0; }
+
+        .status { font-size: 11px; padding: 4px 8px; border-radius: 3px; margin-top: 6px; flex-shrink: 0; }
+        .status-info { background: #e7f3ff; color: #2b579a; }
+        .status-ok { background: #e8f5e9; color: #1b5e20; }
+        .status-err { background: #ffebee; color: #b71c1c; }
+        .status-warn { background: #fff8e1; color: #e65100; }
+
+        #resultArea {
+            background: #fff; border: 1px solid #d0d0d0;
+            border-radius: 6px; margin-top: 6px;
+            max-height: 40%; overflow: hidden;
+            display: none; flex-direction: column;
+        }
+        .result-header {
+            padding: 5px 10px; border-bottom: 1px solid #eee;
+            font-weight: bold; font-size: 12px; color: #333;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .result-stats { font-weight: normal; font-size: 11px; }
+        .result-stats .ins { color: #1b5e20; }
+        .result-stats .del { color: #b71c1c; }
+        .result-body {
+            padding: 8px 10px; overflow-y: auto;
+            font-size: 13px; line-height: 1.8;
+            white-space: pre-wrap; word-break: break-all;
+            flex: 1;
+        }
+        .diff-del { background: #ffcdd2; color: #b71c1c; text-decoration: line-through; padding: 1px 2px; border-radius: 2px; }
+        .diff-ins { background: #c8e6c9; color: #1b5e20; padding: 1px 2px; border-radius: 2px; }
+        .diff-eq  { color: #333; }
+        .diff-empty { color: #999; font-size: 12px; text-align: center; padding: 12px; }
+    </style>
+</head>
+<body>
+    <h3>修订式粘贴</h3>
+    <div class="subtitle">选中原文 ↔ 剪贴板新文，只把差异部分以 Word 修订（w:ins/w:del）写入文档</div>
+
+    <div id="mainScroll">
+    <div class="section">
+        <div class="section-label">模式</div>
+        <div class="mode-list" id="modeList">
+            <label class="mode-item active">
+                <input type="radio" name="mode" value="replace" checked>
+                <div class="mode-text">
+                    <div class="mode-name">选中替换</div>
+                    <div class="mode-desc">选区原文 vs 新文本：相同的保留，删改处标记为修订</div>
+                </div>
+            </label>
+            <label class="mode-item">
+                <input type="radio" name="mode" value="insert">
+                <div class="mode-text">
+                    <div class="mode-name">光标插入</div>
+                    <div class="mode-desc">在光标处插入新文本，全部标记为插入修订</div>
+                </div>
+            </label>
+            <label class="mode-item">
+                <input type="radio" name="mode" value="preview">
+                <div class="mode-text">
+                    <div class="mode-name">选区预览</div>
+                    <div class="mode-desc">只看差异，不写入文档</div>
+                </div>
+            </label>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">新文本（剪贴板 / 手动粘贴）</div>
+        <textarea id="newText" placeholder="点击下方「从剪贴板读取」自动填入，或在此手动粘贴"></textarea>
+        <div class="btn-row">
+            <button class="btn btn-ghost" id="btnClip">从剪贴板读取</button>
+            <button class="btn btn-ghost" id="btnClear">清空</button>
+        </div>
+    </div>
+
+    <div class="btn-row">
+        <button class="btn btn-primary" id="btnExec" style="flex:1;">▶ 执行修订式粘贴</button>
+    </div>
+    <div class="btn-row">
+        <button class="btn btn-ghost" id="btnDownload" disabled>⬇ 下载修订 DOCX（备用）</button>
+    </div>
+
+    <div id="resultArea">
+        <div class="result-header">
+            <span>差异预览（删除 / 插入）</span>
+            <span class="result-stats" id="resultStats"></span>
+        </div>
+        <div class="result-body" id="resultBody"></div>
+    </div>
+    </div>
+
+    <div class="status status-info" id="status">就绪：在 Word 中选中要替换的文本，填入新文本后点击执行</div>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script>
+    // ============== 配置 ==============
+    var REV_AUTHOR = '修订式粘贴';
+    var LS_KEY_TEXT = 'revisedcompare_text';
+    var LS_KEY_MODE = 'revisedcompare_mode';
+    var ANCHOR_MIN = 8;       // 锚点最短长度（归一化后字符数）
+    var MAX_ANCHOR = 300;     // 锚点最长长度
+    var currentMode = 'replace';
+    // w:ins / w:del 的 w:id 必须在整篇文档中唯一，用随机大数起步，避免与文档已有修订冲突
+    var nextRevId = 100000 + Math.floor(Math.random() * 900000);
+
+    var NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    var DEFAULT_FMT = { name: '宋体', size: 12, bold: false, italic: false, color: '' };
+    var _lastDocxBlob = null;
+    var _lastDocxFilename = null;
+
+    // ============== 工具函数 ==============
+    function setStatus(msg, type) {
+        var el = document.getElementById('status');
+        el.textContent = msg || '';
+        el.className = 'status ' + (type || 'status-info');
+    }
+
+    function xmlEscape(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function normalizeText(s) {
+        return String(s || '')
+            .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+            .replace(/[\u00A0\u2000-\u200B\u3000]/g, ' ');
+    }
+
+    // 把连续空白折叠为单个空格
+    function _normSpace(s) { return s.replace(/\s+/g, ' '); }
+
+    // 归一化下标 normIdx -> 原始字符串 raw 中的下标（空白折叠为 1 个归一化字符）
+    function _mapNormToRaw(raw, normIdx) {
+        var rawIdx = 0, normCount = 0;
+        while (rawIdx < raw.length && normCount < normIdx) {
+            if (/\s/.test(raw[rawIdx])) {
+                normCount++;
+                while (rawIdx < raw.length && /\s/.test(raw[rawIdx])) rawIdx++;
+            } else {
+                normCount++;
+                rawIdx++;
+            }
+        }
+        return rawIdx;
+    }
+
+    // 在 target 中查找 source 的前缀（空白不敏感）。
+    // 返回：pos=target 中匹配起点的原始下标；len=归一化长度；
+    //       rawLen=target 中匹配段的原始长度；srcLen=source 前缀的原始长度。
+    function _findPrefixInTarget(source, target, minLen) {
+        var normSource = _normSpace(source);
+        var normTarget = _normSpace(target);
+        var maxCheck = Math.min(normSource.length, MAX_ANCHOR);
+        for (var len = maxCheck; len >= minLen; len--) {
+            var sub = normSource.substring(0, len);
+            var pos = normTarget.indexOf(sub);
+            if (pos >= 0) {
+                var rawStart = _mapNormToRaw(target, pos);
+                var rawEnd   = _mapNormToRaw(target, pos + sub.length);
+                return {
+                    pos: rawStart,
+                    len: len,
+                    rawLen: rawEnd - rawStart,
+                    srcLen: _mapNormToRaw(source, sub.length)
+                };
+            }
+        }
+        return null;
+    }
+
+    // 在 textB 中采样，找一段也出现在 textA 中的长公共子串作为锚点。
+    function _findAnyAnchor(textA, textB, minLen) {
+        var normA = _normSpace(textA);
+        var normB = _normSpace(textB);
+        var best = null;
+        var numSamples = 25;
+        var step = Math.max(1, Math.floor(normB.length / numSamples));
+        for (var start = 0; start < normB.length; start += step) {
+            var maxCheck = Math.min(MAX_ANCHOR, normB.length - start);
+            for (var len = maxCheck; len >= minLen; len--) {
+                var sub = normB.substring(start, start + len);
+                var pos = normA.indexOf(sub);
+                if (pos >= 0) {
+                    if (!best || len > best.len) {
+                        var aStart = _mapNormToRaw(textA, pos);
+                        var aEnd   = _mapNormToRaw(textA, pos + sub.length);
+                        var bStart = _mapNormToRaw(textB, start);
+                        var bEnd   = _mapNormToRaw(textB, start + sub.length);
+                        best = {
+                            aPos: aStart, bPos: bStart,
+                            aLen: aEnd - aStart, bLen: bEnd - bStart,
+                            len: len
+                        };
+                    }
+                    break;
+                }
+            }
+        }
+        return best;
+    }
+
+    // ============== Unicode 安全的字符级 LCS diff ==============
+    function charDiff(textA, textB) {
+        var a = Array.from(textA);
+        var b = Array.from(textB);
+        var m = a.length, n = b.length;
+        var C = [];
+        for (var i = 0; i <= m; i++) { C[i] = []; for (var j = 0; j <= n; j++) C[i][j] = 0; }
+        for (var i = 1; i <= m; i++) {
+            for (var j = 1; j <= n; j++) {
+                C[i][j] = (a[i-1] === b[j-1]) ? C[i-1][j-1] + 1 : Math.max(C[i-1][j], C[i][j-1]);
+            }
+        }
+        var ops = [];
+        var i = m, j = n;
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+                ops.unshift({ type: 'equal', text: a[i-1] }); i--; j--;
+            } else if (j > 0 && (i === 0 || C[i][j-1] >= C[i-1][j])) {
+                ops.unshift({ type: 'insert', text: b[j-1] }); j--;
+            } else {
+                ops.unshift({ type: 'delete', text: a[i-1] }); i--;
+            }
+        }
+        var merged = [];
+        for (var k = 0; k < ops.length; k++) {
+            var last = merged.length > 0 ? merged[merged.length-1] : null;
+            if (last && last.type === ops[k].type) { last.text += ops[k].text; }
+            else { merged.push({ type: ops[k].type, text: ops[k].text }); }
+        }
+        return merged;
+    }
+
+    // ============== 锚点对齐 diff（长文本用锚点切分，短文本直接 LCS） ==============
+    function alignAndDiff(textA, textB) {
+        if (!textA && !textB) return [];
+        if (!textA) return [{ type: 'insert', text: textB }];
+        if (!textB) return [{ type: 'delete', text: textA }];
+
+        var la = textA.length, lb = textB.length;
+        var SHORT = ANCHOR_MIN * 2;
+        if (la < SHORT && lb < SHORT) {
+            return charDiff(textA, textB);
+        }
+
+        // 情况1：textB 的前缀出现在 textA 中 → 前缀前的内容删除，公共前缀保留，递归处理剩余
+        var match = _findPrefixInTarget(textB, textA, ANCHOR_MIN);
+        if (match) {
+            var aBefore = textA.substring(0, match.pos);
+            var aAfter  = textA.substring(match.pos + match.rawLen);
+            var bAfter  = textB.substring(match.srcLen);
+            var eqText  = textB.substring(0, match.srcLen);
+            var out = [];
+            if (aBefore) out.push({ type: 'delete', text: aBefore });
+            out.push({ type: 'equal', text: eqText });
+            return out.concat(alignAndDiff(aAfter, bAfter));
+        }
+
+        // 情况2：textA 的前缀出现在 textB 中 → 前缀前的内容插入，公共前缀保留，递归处理剩余
+        match = _findPrefixInTarget(textA, textB, ANCHOR_MIN);
+        if (match) {
+            var bBefore = textB.substring(0, match.pos);
+            var bAfter  = textB.substring(match.pos + match.rawLen);
+            var aAfter  = textA.substring(match.srcLen);
+            var eqText2 = textA.substring(0, match.srcLen);
+            var out2 = [];
+            if (bBefore) out2.push({ type: 'insert', text: bBefore });
+            out2.push({ type: 'equal', text: eqText2 });
+            return out2.concat(alignAndDiff(aAfter, bAfter));
+        }
+
+        // 情况3：两文中间某处有公共长片段 → 以它为锚点，左右分别递归
+        match = _findAnyAnchor(textA, textB, ANCHOR_MIN);
+        if (match) {
+            var aLeft  = textA.substring(0, match.aPos);
+            var aRight = textA.substring(match.aPos + match.aLen);
+            var bLeft  = textB.substring(0, match.bPos);
+            var bRight = textB.substring(match.bPos + match.bLen);
+            var eqText3 = textB.substring(match.bPos, match.bPos + match.bLen);
+            return alignAndDiff(aLeft, bLeft)
+                .concat([{ type: 'equal', text: eqText3 }])
+                .concat(alignAndDiff(aRight, bRight));
+        }
+
+        // 兜底：长度相近时用字符级 LCS；否则整段删 + 整段插
+        if (la > 0 && lb > 0 && Math.max(la, lb) / Math.min(la, lb) <= 3) {
+            return charDiff(textA, textB);
+        }
+        var ops = [];
+        if (textA) ops.push({ type: 'delete', text: textA });
+        if (textB) ops.push({ type: 'insert', text: textB });
+        return ops;
+    }
+
+    // ============== 统计 ==============
+    function countOps(ops) {
+        var ins = 0, del = 0;
+        for (var i = 0; i < ops.length; i++) {
+            var op = ops[i];
+            if (op.type === 'insert') ins += Array.from(op.text).length;
+            else if (op.type === 'delete') del += Array.from(op.text).length;
+        }
+        return { ins: ins, del: del };
+    }
+
+    // ============== 差异预览 ==============
+    function showPreview(ops) {
+        var html = '';
+        for (var i = 0; i < ops.length; i++) {
+            var op = ops[i];
+            if (op.type === 'equal') {
+                html += '<span class="diff-eq">' + xmlEscape(op.text) + '</span>';
+            } else if (op.type === 'insert') {
+                html += '<span class="diff-ins">' + xmlEscape(op.text) + '</span>';
+            } else if (op.type === 'delete') {
+                html += '<span class="diff-del">' + xmlEscape(op.text) + '</span>';
+            }
+        }
+        document.getElementById('resultBody').innerHTML = html || '<div class="diff-empty">无差异</div>';
+        document.getElementById('resultArea').style.display = 'flex';
+        var counts = countOps(ops);
+        document.getElementById('resultStats').innerHTML =
+            '<span class="ins">+ ' + counts.ins + '</span> / <span class="del">- ' + counts.del + '</span>';
+        return counts;
+    }
+
+    // ============== 读取剪贴板 ==============
+    function readClipboard() {
+        function fill(text) {
+            if (text && text.trim()) {
+                document.getElementById('newText').value = text;
+                saveText();
+                setStatus('已从剪贴板读取 ' + Array.from(text).length + ' 字', 'status-ok');
+            } else {
+                setStatus('剪贴板为空或无文本', 'status-warn');
+            }
+        }
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(fill).catch(function(e) {
+                // 部分桌面 WebView 不支持异步剪贴板 API，尝试旧接口
+                if (window.clipboardData && window.clipboardData.getData) {
+                    fill(window.clipboardData.getData('Text'));
+                } else {
+                    setStatus('读取剪贴板失败：' + (e.message || e) + '（请手动粘贴到文本框）', 'status-warn');
+                }
+            });
+        } else if (window.clipboardData && window.clipboardData.getData) {
+            fill(window.clipboardData.getData('Text'));
+        } else {
+            setStatus('当前环境不支持读取剪贴板，请手动粘贴到文本框', 'status-warn');
+        }
+    }
+
+    // ============== localStorage 持久化 ==============
+    function saveText() {
+        try { localStorage.setItem(LS_KEY_TEXT, document.getElementById('newText').value); } catch(e) {}
+    }
+    function saveMode() {
+        try { localStorage.setItem(LS_KEY_MODE, currentMode); } catch(e) {}
+    }
+    function restoreText() {
+        try { var t = localStorage.getItem(LS_KEY_TEXT); if (t !== null) document.getElementById('newText').value = t; } catch(e) {}
+    }
+    function restoreMode() {
+        try {
+            var m = localStorage.getItem(LS_KEY_MODE);
+            if (m && (m === 'replace' || m === 'insert' || m === 'preview')) {
+                currentMode = m;
+                var radios = document.querySelectorAll('input[name="mode"]');
+                for (var i = 0; i < radios.length; i++) {
+                    radios[i].checked = (radios[i].value === m);
+                    var item = radios[i].closest('.mode-item');
+                    if (item) item.classList.toggle('active', radios[i].checked);
+                }
+            }
+        } catch(e) {}
+    }
+
+    // ============== 把 ops 按换行拆成段落（修订标记不能跨段落） ==============
+    function opsToParagraphs(ops) {
+        var paragraphs = [];
+        var current = [];
+        for (var i = 0; i < ops.length; i++) {
+            var op = ops[i];
+            var parts = op.text.split('\n');
+            for (var j = 0; j < parts.length; j++) {
+                if (j > 0) {
+                    paragraphs.push(current);
+                    current = [];
+                }
+                if (parts[j]) {
+                    current.push({ type: op.type, text: parts[j] });
+                }
+            }
+        }
+        paragraphs.push(current);
+        return paragraphs;
+    }
+
+    // ============== 段落级 diff（原段视角，供 trackRevisions 写入） ==============
+    // 返回 { ops: ops[原段索引] = {type:'equal'|'delete'|'replace', newText, insertAfter:[..]}, headInsert:[..] }
+    // headInsert 表示插在选区第一段之前的新段落（原选区没有对应段落）
+    function buildParaOps(origText, newText) {
+        var a = origText.split('\n');
+        var b = newText.split('\n');
+        var m = a.length, n = b.length;
+        var C = [];
+        for (var i = 0; i <= m; i++) { C[i] = []; for (var j = 0; j <= n; j++) C[i][j] = 0; }
+        for (var i = 1; i <= m; i++) {
+            for (var j = 1; j <= n; j++) {
+                C[i][j] = (a[i-1] === b[j-1]) ? C[i-1][j-1] + 1 : Math.max(C[i-1][j], C[i][j-1]);
+            }
+        }
+        var seq = [];
+        var i = m, j = n;
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && a[i-1] === b[j-1]) { seq.push({ kind: 'equal', ai: i-1 }); i--; j--; }
+            else if (j > 0 && (i === 0 || C[i][j-1] >= C[i-1][j])) { seq.push({ kind: 'insert', bj: j-1 }); j--; }
+            else { seq.push({ kind: 'delete', ai: i-1 }); i--; }
+        }
+        seq.reverse();
+
+        var ops = [];
+        for (var x = 0; x < a.length; x++) ops.push(null);
+        var headInsert = [];
+        var pendingDel = null;
+        for (var s = 0; s < seq.length; s++) {
+            var e = seq[s];
+            if (e.kind === 'equal') {
+                ops[e.ai] = ops[e.ai] || { type: 'equal' };
+                pendingDel = null;
+            } else if (e.kind === 'delete') {
+                ops[e.ai] = { type: 'delete' };
+                pendingDel = e.ai;
+            } else {
+                if (pendingDel !== null) {
+                    var rep = ops[pendingDel];
+                    rep.type = 'replace';
+                    rep.newText = (rep.newText || '') + b[e.bj];
+                    pendingDel = null;
+                } else {
+                    var anchor = -1;
+                    for (var t = s - 1; t >= 0; t--) {
+                        if (seq[t].kind !== 'insert' && seq[t].ai !== undefined) { anchor = seq[t].ai; break; }
+                    }
+                    if (anchor === -1) {
+                        headInsert.push(b[e.bj]);
+                    } else {
+                        if (!ops[anchor]) ops[anchor] = { type: 'equal' };
+                        if (!ops[anchor].insertAfter) ops[anchor].insertAfter = [];
+                        ops[anchor].insertAfter.push(b[e.bj]);
+                    }
+                }
+            }
+        }
+        return { ops: ops, headInsert: headInsert };
+    }
+
+    // ============== 修订式写入：trackRevisions（Word 原生修订） ==============
+    // 段落级：equal 跳过；replace 替换整段文本；delete 删除整段；insertAfter 在段后插入新段；
+    // headInsert 插在选区第一段之前。全部从后往前执行，避免段落索引漂移。
+    function writeRevisionsTracked(paraOps, headInsert, fmt, dateStr) {
+        return Word.run(function(ctx) {
+            var sel = ctx.document.getSelection();
+            var paras = sel.paragraphs;
+            ctx.load(paras, 'items');
+            return ctx.sync().then(function() {
+                var items = paras.items;
+                if (items.length !== paraOps.length) {
+                    throw new Error('PARA_COUNT_MISMATCH');
+                }
+                ctx.load(ctx.document, 'trackRevisions');
+                return ctx.sync().then(function() {
+                    var wasTrack = ctx.document.trackRevisions;
+                    ctx.document.trackRevisions = true;
+                    for (var k = items.length - 1; k >= 0; k--) {
+                        var op = paraOps[k];
+                        var para = items[k];
+                        // 选区第一段之前插入新段落（headInsert 必须最先处理，保证锚点有效）
+                        if (k === 0 && headInsert && headInsert.length) {
+                            for (var t = headInsert.length - 1; t >= 0; t--) {
+                                para.insertParagraph(headInsert[t], Word.InsertLocation.before);
+                            }
+                        }
+                        if (!op) continue;
+                        if (op.type === 'equal' && !(op.insertAfter && op.insertAfter.length)) continue;
+                        if (op.insertAfter && op.insertAfter.length) {
+                            var p = para;
+                            for (var u = 0; u < op.insertAfter.length; u++) {
+                                p = p.insertParagraph(op.insertAfter[u], Word.InsertLocation.after);
+                            }
+                        }
+                        if (op.type === 'replace') {
+                            para.insertText(op.newText, Word.InsertLocation.replace);
+                        } else if (op.type === 'delete') {
+                            para.delete();
+                        }
+                    }
+                    return ctx.sync().then(function() {
+                        ctx.document.trackRevisions = wasTrack;
+                        return ctx.sync();
+                    });
+                });
+            });
+        });
+    }
+
+    // 整体替换（段落未对齐或段落级写入失败时）：修订模式下整段替换，Word 自动标记
+    function writeWholeSelectionTracked(newText, fmt, dateStr) {
+        return Word.run(function(ctx) {
+            var sel = ctx.document.getSelection();
+            ctx.load(ctx.document, 'trackRevisions');
+            return ctx.sync().then(function() {
+                var wasTrack = ctx.document.trackRevisions;
+                ctx.document.trackRevisions = true;
+                sel.insertText(newText, Word.InsertLocation.replace);
+                return ctx.sync().then(function() {
+                    ctx.document.trackRevisions = wasTrack;
+                    return ctx.sync();
+                });
+            });
+        });
+    }
+
+    // 光标处插入（insert 模式）：修订模式下插入，Word 自动标记为插入
+    function writeInsertTracked(newText, fmt, dateStr) {
+        return Word.run(function(ctx) {
+            var sel = ctx.document.getSelection();
+            ctx.load(ctx.document, 'trackRevisions');
+            return ctx.sync().then(function() {
+                var wasTrack = ctx.document.trackRevisions;
+                ctx.document.trackRevisions = true;
+                sel.insertText(newText, Word.InsertLocation.after);
+                return ctx.sync().then(function() {
+                    ctx.document.trackRevisions = wasTrack;
+                    return ctx.sync();
+                });
+            });
+        });
+    }
+
+    // 选区修订写入入口：优先段落级 trackRevisions，失败回退整体替换
+    function writeSelectionTracked(normOrig, normNew, paraTexts, fmt, dateStr) {
+        var origParas = normOrig.split('\n');
+        var aligned = (paraTexts && paraTexts.length === origParas.length);
+        if (aligned) {
+            for (var i = 0; i < origParas.length; i++) {
+                if (normalizeText(paraTexts[i]) !== origParas[i]) { aligned = false; break; }
+            }
+        }
+        if (aligned) {
+            var pRes = buildParaOps(normOrig, normNew);
+            return writeRevisionsTracked(pRes.ops, pRes.headInsert, fmt, dateStr)
+                .catch(function() {
+                    return writeWholeSelectionTracked(normNew, fmt, dateStr);
+                });
+        }
+        return writeWholeSelectionTracked(normNew, fmt, dateStr);
+    }
+
+    // ============== 读取选区/光标位置的字体格式 ==============
+    // 注意：range 必须已经 load('font') 并 sync 过
+    function extractFormatting(range) {
+        var f = range.font || {};
+        return {
+            name: f.name || '宋体',
+            size: (f.size && f.size > 0) ? f.size : 12,
+            bold: f.bold === true,
+            italic: f.italic === true,
+            color: (f.color && f.color.indexOf('#') === 0) ? f.color.substring(1) : ((f.color && f.color !== 'auto') ? f.color : '')
+        };
+    }
+
+    // ============== 生成 <w:rPr> XML ==============
+    function buildRunPrXml(fmt) {
+        if (!fmt || !fmt.name) return '';
+        var xml = '<w:rPr>';
+        xml += '<w:rFonts w:ascii="' + xmlEscape(fmt.name) + '" w:hAnsi="' + xmlEscape(fmt.name) + '" w:eastAsia="' + xmlEscape(fmt.name) + '" w:cs="' + xmlEscape(fmt.name) + '"/>';
+        var halfPts = Math.round(fmt.size * 2);
+        xml += '<w:sz w:val="' + halfPts + '"/>';
+        xml += '<w:szCs w:val="' + halfPts + '"/>';
+        if (fmt.bold) { xml += '<w:b/>'; xml += '<w:bCs/>'; }
+        if (fmt.italic) { xml += '<w:i/>'; xml += '<w:iCs/>'; }
+        if (fmt.color && fmt.color.length >= 6) {
+            xml += '<w:color w:val="' + fmt.color.toUpperCase() + '"/>';
+        }
+        xml += '</w:rPr>';
+        return xml;
+    }
+
+    // ============== 生成带 w:ins/w:del 的 OOXML 片段（insertOoxml 用） ==============
+    function buildTrackedOoxml(ops, author, dateStr, fmt) {
+        var rPrXml = buildRunPrXml(fmt);
+        var paragraphs = opsToParagraphs(ops);
+        var xml = '';
+        for (var p = 0; p < paragraphs.length; p++) {
+            xml += (p === 0)
+                ? '<w:p xmlns:w="' + NS_W + '">'
+                : '<w:p>';
+            var pOps = paragraphs[p];
+            for (var k = 0; k < pOps.length; k++) {
+                var op = pOps[k];
+                var escaped = xmlEscape(op.text);
+                if (op.type === 'equal') {
+                    xml += '<w:r>' + rPrXml + '<w:t xml:space="preserve">' + escaped + '</w:t></w:r>';
+                } else if (op.type === 'insert') {
+                    var rid = nextRevId++;
+                    xml += '<w:ins w:id="' + rid + '" w:author="' + xmlEscape(author) + '" w:date="' + dateStr + '">';
+                    xml += '<w:r>' + rPrXml + '<w:t xml:space="preserve">' + escaped + '</w:t></w:r>';
+                    xml += '</w:ins>';
+                } else if (op.type === 'delete') {
+                    var rid2 = nextRevId++;
+                    xml += '<w:del w:id="' + rid2 + '" w:author="' + xmlEscape(author) + '" w:date="' + dateStr + '">';
+                    xml += '<w:r>' + rPrXml + '<w:delText xml:space="preserve">' + escaped + '</w:delText></w:r>';
+                    xml += '</w:del>';
+                }
+            }
+            xml += '</w:p>';
+        }
+        return xml;
+    }
+
+    // ============== 生成带修订标记的完整 DOCX Blob（下载 / insertFileFromBase64 回退用） ==============
+    function buildTrackedDocxBlob(ops, author, dateStr, fmt) {
+        var zip = new JSZip();
+
+        var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        contentTypes += '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">';
+        contentTypes += '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>';
+        contentTypes += '<Default Extension="xml" ContentType="application/xml"/>';
+        contentTypes += '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>';
+        contentTypes += '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>';
+        contentTypes += '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
+        contentTypes += '</Types>';
+
+        var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        rootRels += '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        rootRels += '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>';
+        rootRels += '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>';
+        rootRels += '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>';
+        rootRels += '</Relationships>';
+
+        var docRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        docRels += '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        docRels += '</Relationships>';
+
+        var coreXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        coreXml += '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ';
+        coreXml += 'xmlns:dc="http://purl.org/dc/elements/1.1/" ';
+        coreXml += 'xmlns:dcterms="http://purl.org/dc/terms/" ';
+        coreXml += 'xmlns:dcmitype="http://purl.org/dc/dcmitype/" ';
+        coreXml += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">';
+        coreXml += '<dc:creator>' + xmlEscape(author) + '</dc:creator>';
+        coreXml += '<cp:lastModifiedBy>' + xmlEscape(author) + '</cp:lastModifiedBy>';
+        coreXml += '<dcterms:created xsi:type="dcterms:W3CDTF">' + dateStr + '</dcterms:created>';
+        coreXml += '<dcterms:modified xsi:type="dcterms:W3CDTF">' + dateStr + '</dcterms:modified>';
+        coreXml += '</cp:coreProperties>';
+
+        var appXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        appXml += '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" ';
+        appXml += 'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">';
+        appXml += '<Application>修订式粘贴</Application>';
+        appXml += '</Properties>';
+
+        var fragment = buildTrackedOoxml(ops, author, dateStr, fmt);
+        var docXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        docXml += '<w:document xmlns:w="' + NS_W + '" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+        docXml += '<w:body>' + fragment;
+        docXml += '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>';
+        docXml += '</w:body></w:document>';
+
+        zip.file('[Content_Types].xml', contentTypes);
+        zip.file('_rels/.rels', rootRels);
+        zip.file('word/document.xml', docXml);
+        zip.file('word/_rels/document.xml.rels', docRels);
+        zip.file('docProps/core.xml', coreXml);
+        zip.file('docProps/app.xml', appXml);
+
+        return zip.generateAsync({ type: 'blob' });
+    }
+
+    // ============== Blob → Base64 ==============
+    function blobToBase64(blob) {
+        return new Promise(function(resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function() {
+                var dataUrl = reader.result;
+                resolve(dataUrl.split(',')[1]);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    // ============== 下载 DOCX 回退 ==============
+    function downloadDocxBlob(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename || 'revised-compare.docx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
+    }
+
+    // ============== 把修订片段写入当前选区 ==============
+    // 注：旧版用 insertOoxml 注入 w:ins/w:del，但 Office.js 对修订标记无官方支持，
+    // 多数 Word 版本会静默"接受"修订导致整体替换。现统一改用 trackRevisions 机制
+    // （见 writeRevisionsTracked / writeWholeSelectionTracked / writeInsertTracked）。
+
+    // ============== 主执行 ==============
+    function execute() {
+        var newText = document.getElementById('newText').value;
+        if (!newText || !newText.trim()) {
+            setStatus('请先填入新文本', 'status-warn');
+            return;
+        }
+        if (typeof Word === 'undefined' || !Word.run) {
+            setStatus('当前不在 Word 环境，请在 Word 中打开本加载项', 'status-err');
+            return;
+        }
+
+        var dateStr = new Date().toISOString();
+
+        // 第一步：读取选区文本与格式
+        setStatus('正在读取选区…', 'status-info');
+        Word.run(function(ctx) {
+            var sel = ctx.document.getSelection();
+            var paras = sel.paragraphs;
+            sel.load('text, isCollapsed, font');
+            ctx.load(paras, 'items/text');
+            return ctx.sync().then(function() {
+                var paraTexts = [];
+                var items = paras.items;
+                for (var i = 0; i < items.length; i++) {
+                    paraTexts.push(items[i].text);
+                }
+                return {
+                    isCollapsed: sel.isCollapsed,
+                    text: sel.text,
+                    fmt: extractFormatting(sel),
+                    paraTexts: paraTexts
+                };
+            });
+        }).then(function(result) {
+            var fmt = result.fmt || DEFAULT_FMT;
+
+            // —— 光标插入：全部标记为插入 ——
+            if (currentMode === 'insert') {
+                var insOps = [{ type: 'insert', text: normalizeText(newText) }];
+                showPreview(insOps);
+                setStatus('正在插入修订文本…', 'status-info');
+                return writeInsertTracked(normalizeText(newText), fmt, dateStr).then(function() {
+                    return maybeSaveDownload(insOps, dateStr, fmt, 'insert-revised.docx');
+                }).then(function() {
+                    setStatus('已插入 ' + Array.from(newText).length + ' 字（标记为插入修订）', 'status-ok');
+                });
+            }
+
+            // —— 选中替换 / 选区预览 ——
+            if (result.isCollapsed) {
+                setStatus('请先在文档中选中要替换的文本（当前光标未选中任何内容）', 'status-warn');
+                return;
+            }
+            var origText = result.text;
+            if (!origText || !origText.trim()) {
+                setStatus('选区为空，请先选中文本', 'status-warn');
+                return;
+            }
+
+            var normOrig = normalizeText(origText);
+            var normNew  = normalizeText(newText);
+            var ops = alignAndDiff(normOrig, normNew);
+            var counts = showPreview(ops);
+
+            // 无差异：不执行无意义的替换写入
+            if (counts.ins === 0 && counts.del === 0) {
+                if (currentMode === 'preview') {
+                    setStatus('预览：无差异', 'status-ok');
+                } else {
+                    setStatus('无差异：新文本与选区内容一致，未写入文档', 'status-ok');
+                }
+                return;
+            }
+
+            if (currentMode === 'preview') {
+                setStatus('预览已生成（未写入文档）：删除 ' + counts.del + ' 字 / 插入 ' + counts.ins + ' 字', 'status-ok');
+                return;
+            }
+
+            setStatus('正在写入修订（删 ' + counts.del + ' / 插 ' + counts.ins + '）…', 'status-info');
+            return writeSelectionTracked(normOrig, normNew, result.paraTexts, fmt, dateStr).then(function() {
+                return maybeSaveDownload(ops, dateStr, fmt, 'revised-compare.docx');
+            }).then(function() {
+                setStatus('已写入文档：删除 ' + counts.del + ' 字 / 插入 ' + counts.ins + ' 字（Word 原生修订，请在「审阅 → 所有标记」视图查看）', 'status-ok');
+            });
+        }).catch(function(e) {
+            setStatus('执行失败：' + (e.message || e) + '，可点"下载修订 DOCX"手动插入', 'status-err');
+        });
+    }
+
+    // 生成一份可下载的 DOCX 备用（不影响主流程）
+    function maybeSaveDownload(ops, dateStr, fmt, filename) {
+        return buildTrackedDocxBlob(ops, REV_AUTHOR, dateStr, fmt).then(function(blob) {
+            _lastDocxBlob = blob;
+            _lastDocxFilename = filename;
+            document.getElementById('btnDownload').disabled = false;
+        }).catch(function() {});
+    }
+
+    // ============== 事件绑定 ==============
+    function initEvents() {
+        restoreText();
+        restoreMode();
+
+        var textEl = document.getElementById('newText');
+        textEl.addEventListener('input', saveText);
+
+        var radios = document.querySelectorAll('input[name="mode"]');
+        for (var i = 0; i < radios.length; i++) {
+            radios[i].addEventListener('change', function(e) {
+                currentMode = e.target.value;
+                saveMode();
+                var items = document.querySelectorAll('.mode-item');
+                for (var j = 0; j < items.length; j++) {
+                    items[j].classList.toggle('active', items[j].contains(e.target));
+                }
+            });
+        }
+
+        document.getElementById('btnClip').addEventListener('click', readClipboard);
+        document.getElementById('btnClear').addEventListener('click', function() {
+            document.getElementById('newText').value = '';
+            saveText();
+            document.getElementById('resultArea').style.display = 'none';
+            setStatus('已清空', 'status-info');
+            document.getElementById('newText').focus();
+        });
+        document.getElementById('btnExec').addEventListener('click', execute);
+
+        document.getElementById('btnDownload').addEventListener('click', function() {
+            if (_lastDocxBlob) {
+                downloadDocxBlob(_lastDocxBlob, _lastDocxFilename);
+                setStatus('已下载 ' + _lastDocxFilename + '，可用 Word「插入 → 文件」保留修订', 'status-ok');
+            }
+        });
+
+        textEl.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                execute();
+            }
+        });
+    }
+
+    Office.onReady(function(info) {
+        initEvents();
+    });
+    </script>
+</body>
+</html>

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Univer 全屏模式</title>
+
+<script src="dist/react.production.min.js"></script>
+<script src="dist/react-dom.production.min.js"></script>
+<script src="dist/rxjs.umd.min.js"></script>
+<script src="dist/echarts.min.js"></script>
+
+<script src="dist/univer-presets.umd.js"></script>
+<script src="dist/univer-preset-sheets-core.umd.js"></script>
+<script src="dist/univer-preset-sheets-drawing.umd.js"></script>
+<script src="dist/univer-preset-sheets-advanced.umd.js"></script>
+<script src="dist/univer-locale-zh-CN.js"></script>
+<script src="dist/univer-drawing-locale-zh-CN.js"></script>
+<script src="dist/univer-advanced-locale-zh-CN.js"></script>
+<link rel="stylesheet" href="dist/univer.css">
+<link rel="stylesheet" href="dist/univer-drawing.css">
+<link rel="stylesheet" href="dist/univer-advanced.css">
+
+<style>
+html,body{height:100%;margin:0;padding:0;overflow:hidden;}
+body{display:flex;flex-direction:column;font-family:"Microsoft YaHei",sans-serif;font-size:12px;color:#333;background:#fff;}
+.topbar{padding:6px 12px;border-bottom:1px solid #ddd;background:#2b579a;color:#fff;display:flex;gap:8px;align-items:center;flex-shrink:0;height:36px;}
+.topbar .title{flex:1;font-size:13px;font-weight:bold;}
+.topbar button{padding:4px 12px;font-size:12px;cursor:pointer;border:1px solid #fff;border-radius:3px;background:#3a6bb5;color:#fff;white-space:nowrap;}
+.topbar button:hover{background:#4f80d6;}
+.topbar button.accent{background:#fff;color:#2b579a;border-color:#fff;font-weight:bold;}
+.topbar button.accent:hover{background:#e8e8e8;}
+#univer-app{flex:1;position:relative;background:#fff;}
+.fallback{padding:20px;text-align:center;color:#888;font-size:13px;line-height:1.8;}
+.status{padding:4px 12px;border-top:1px solid #ddd;background:#f3f3f3;font-size:11px;color:#555;flex-shrink:0;min-height:22px;}
+.status.ok{color:#0a7a2a;}
+.status.err{color:#c0392b;}
+.status.working{color:#2b579a;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="title">📊 Univer 全屏模式 — 在 Word 上方独立编辑，完成后点「保存并关闭」把数据带回任务窗格</span>
+  <button onclick="window.location.reload()" title="重新载入" style="background:#3a6bb5;">⟳ 重新载入</button>
+  <button onclick="saveAndClose()" title="把当前工作表数据保存到 Word 文档 Settings（同步到任务窗格）并关闭浮窗" class="accent">💾 保存并关闭</button>
+  <button onclick="closeDialog()" title="关闭浮窗（数据保留在 Word 文档 Settings 内，下一次点「放大」仍能看到）">✕ 关闭</button>
+</div>
+
+<div id="univer-app"><div class="fallback" id="loadingHint">正在加载 Univer 全屏模式…</div></div>
+
+<div class="status" id="status">初始化中…</div>
+
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script>
+var isReady = false;
+var univerAPI = null;
+var _autoSaveInterval = null;
+
+function setStatus(msg, type) {
+  var el = document.getElementById('status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'status' + (type ? (' ' + type) : '');
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function getSheetData2D() {
+  try {
+    var wb = univerAPI.getActiveWorkbook();
+    if (!wb) return { rows: [], maxR: -1, maxC: -1 };
+    var sheet = wb.getActiveSheet();
+    if (!sheet) return { rows: [], maxR: -1, maxC: -1 };
+    var maxC = sheet.getMaxColumns();
+    var maxR = sheet.getMaxRows();
+    var lastDataRow = -1;
+    var lastDataCol = -1;
+    for (var r = 0; r < maxR; r++) {
+      for (var c = 0; c < maxC; c++) {
+        var val = sheet.getRange(r, c).getValue();
+        if (val !== null && val !== undefined && val !== '') {
+          if (r > lastDataRow) lastDataRow = r;
+          if (c > lastDataCol) lastDataCol = c;
+        }
+      }
+    }
+    if (lastDataRow < 0) return { rows: [], maxR: -1, maxC: -1 };
+    var rows2d = [];
+    for (var rr = 0; rr <= lastDataRow; rr++) {
+      var arr = [];
+      for (var cc = 0; cc <= lastDataCol; cc++) {
+        var v = sheet.getRange(rr, cc).getValue();
+        arr.push(v === null || v === undefined ? '' : String(v));
+      }
+      rows2d.push(arr);
+    }
+    return { rows: rows2d, maxR: lastDataRow, maxC: lastDataCol };
+  } catch (e) {
+    return { rows: [], maxR: -1, maxC: -1 };
+  }
+}
+
+function saveToDocumentSync() {
+  if (!univerAPI) return false;
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document || !Office.context.document.settings) return false;
+  try {
+    var info = getSheetData2D();
+    var json = info.maxR < 0 ? '' : JSON.stringify(info.rows);
+    Office.context.document.settings.set('univerData', json);
+    return true;
+  } catch (e) { return false; }
+}
+
+function saveAndClose() {
+  setStatus('正在保存到 Word 文档…', 'working');
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document || !Office.context.document.settings) {
+    setStatus('不在 Word 环境，无法保存', 'err');
+    return;
+  }
+  try {
+    var info = getSheetData2D();
+    var json = info.maxR < 0 ? '' : JSON.stringify(info.rows);
+    Office.context.document.settings.set('univerData', json);
+    Office.context.document.settings.saveAsync(function(ar) {
+      if (ar.status === Office.AsyncResultStatus.Succeeded) {
+        setStatus('已保存：' + (info.maxR < 0 ? '空' : ((info.maxR + 1) + ' 行 × ' + (info.maxC + 1) + ' 列')) + '，关闭浮窗…', 'ok');
+        // 通知 taskpane 后延迟关闭，避免卡顿
+        setTimeout(function() {
+          try {
+            if (Office.context.ui && typeof Office.context.ui.closeContainer === 'function') {
+              Office.context.ui.closeContainer();
+            } else {
+              window.close();
+            }
+          } catch (e) { try { window.close(); } catch (e2) {} }
+        }, 200);
+      } else {
+        setStatus('保存失败：' + (ar.error && ar.error.message ? ar.error.message : ''), 'err');
+      }
+    });
+  } catch (e) {
+    setStatus('保存失败：' + (e.message || e), 'err');
+  }
+}
+
+function closeDialog() {
+  try {
+    if (typeof Office !== 'undefined' && Office.context && Office.context.ui && typeof Office.context.ui.closeContainer === 'function') {
+      Office.context.ui.closeContainer();
+    } else {
+      window.close();
+    }
+  } catch (e) {
+    try { window.close(); } catch (e2) {}
+  }
+}
+
+function loadFromDocument() {
+  if (typeof Office === 'undefined' || !Office.context || !Office.context.document || !Office.context.document.settings) return null;
+  try {
+    var json = Office.context.document.settings.get('univerData');
+    if (!json) return null;
+    var data = JSON.parse(json);
+    if (!data || data.length === 0) return null;
+    var hasContent = false;
+    for (var i = 0; i < data.length && !hasContent; i++) {
+      if (data[i]) {
+        for (var j = 0; j < data[i].length; j++) {
+          if (data[i][j] !== null && data[i][j] !== undefined && data[i][j] !== '') { hasContent = true; break; }
+        }
+      }
+    }
+    return hasContent ? data : null;
+  } catch (e) { return null; }
+}
+
+function loadDataIntoSheet(data2d) {
+  if (!univerAPI) return;
+  try {
+    var wb = univerAPI.getActiveWorkbook();
+    if (!wb) return;
+    var sheet = wb.getActiveSheet();
+    if (!sheet) return;
+    var oldR = sheet.getMaxRows();
+    var oldC = sheet.getMaxColumns();
+    for (var i = 0; i < oldR; i++) {
+      for (var j = 0; j < oldC; j++) {
+        var cv = sheet.getRange(i, j).getValue();
+        if (cv !== null && cv !== undefined && cv !== '') {
+          try { sheet.getRange(i, j).setValue(''); } catch (e2) {}
+        }
+      }
+    }
+    if (!data2d || data2d.length === 0) return;
+    for (var i = 0; i < data2d.length; i++) {
+      if (!data2d[i]) continue;
+      for (var j = 0; j < data2d[i].length; j++) {
+        var cell = data2d[i][j];
+        if (cell === null || cell === undefined || cell === '') continue;
+        var v = (typeof cell === 'object' && cell.v !== undefined) ? cell.v : cell;
+        if (v === '' || v === null || v === undefined) continue;
+        try { sheet.getRange(i, j).setValue(v); } catch (e3) {}
+      }
+    }
+  } catch (e) {}
+}
+
+/* 初始化 Univer —— 与 taskpane 共用同一个 settings key 'univerData' */
+function initUniver() {
+  try {
+    var hint = document.getElementById('loadingHint');
+    var stages = [];
+    var progress = function(msg) {
+      stages.push(msg);
+      setStatus('初始化：' + msg, 'working');
+      try { console.log('[Univer-init-dialog]', msg); } catch(e) {}
+    };
+
+    progress('检查脚本依赖…');
+    var missing = [];
+    if (typeof UniverPresets === 'undefined') missing.push('univer-presets.umd.js');
+    if (typeof UniverPresetSheetsCore === 'undefined') missing.push('univer-preset-sheets-core.umd.js');
+    if (missing.length) {
+      setStatus('缺少核心脚本：' + missing.join('、'), 'err');
+      if (hint) hint.innerHTML = '<div class="fallback"><p><strong>脚本加载失败</strong></p><p>请确认 dist 目录完整。</p></div>';
+      return;
+    }
+
+    progress('解析 API…');
+    var createUniver = UniverPresets.createUniver;
+    if (typeof createUniver !== 'function') {
+      setStatus('createUniver 不可用', 'err');
+      if (hint) hint.innerHTML = '<div class="fallback"><p><strong>API 不兼容</strong></p></div>';
+      return;
+    }
+
+    var LocaleType = (UniverCore && UniverCore.LocaleType) || null;
+    var mergeLocales = (UniverCore && UniverCore.mergeLocales) || function() {
+      var out = {};
+      for (var i = 0; i < arguments.length; i++) {
+        var l = arguments[i];
+        if (l && typeof l === 'object') for (var k in l) if (Object.prototype.hasOwnProperty.call(l, k)) out[k] = l[k];
+      }
+      return out;
+    };
+    var UniverSheetsCorePreset = UniverPresetSheetsCore.UniverSheetsCorePreset;
+
+    progress('构建预设…');
+    var presetFns = [UniverSheetsCorePreset({ container: 'univer-app' })];
+    var zhCNAvailable = [];
+    if (typeof UniverPresetSheetsCoreZhCN !== 'undefined') zhCNAvailable.push(UniverPresetSheetsCoreZhCN);
+    if (typeof UniverPresetSheetsDrawing !== 'undefined' && UniverPresetSheetsDrawing.UniverSheetsDrawingPreset) {
+      presetFns.push(UniverPresetSheetsDrawing.UniverSheetsDrawingPreset({ container: 'univer-app' }));
+      if (typeof UniverPresetSheetsDrawingZhCN !== 'undefined') zhCNAvailable.push(UniverPresetSheetsDrawingZhCN);
+    }
+    if (typeof UniverPresetSheetsAdvanced !== 'undefined' && UniverPresetSheetsAdvanced.UniverSheetsAdvancedPreset) {
+      presetFns.push(UniverPresetSheetsAdvanced.UniverSheetsAdvancedPreset({ container: 'univer-app' }));
+      if (typeof UniverPresetSheetsAdvancedZhCN !== 'undefined') zhCNAvailable.push(UniverPresetSheetsAdvancedZhCN);
+    }
+
+    var initOpts = { presets: presetFns };
+    if (LocaleType) {
+      initOpts.locale = LocaleType.ZH_CN;
+      initOpts.locales = {};
+      initOpts.locales[LocaleType.ZH_CN] = mergeLocales.apply(null, zhCNAvailable);
+    }
+
+    progress('创建实例…');
+    var result = createUniver(initOpts);
+    univerAPI = result.univerAPI;
+
+    progress('创建空白工作簿…');
+    univerAPI.createWorkbook({ name: 'Sheet1' });
+    if (hint) hint.style.display = 'none';
+
+    // 5 秒周期保存
+    _autoSaveInterval = setInterval(function() {
+      if (saveToDocumentSync() && typeof Office !== 'undefined' && Office.context && Office.context.document && Office.context.document.settings) {
+        try { Office.context.document.settings.saveAsync(function(){}); } catch (e) {}
+      }
+    }, 5000);
+
+    isReady = true;
+    setStatus('就绪（全屏模式）', 'ok');
+
+    // 恢复数据
+    var saved = loadFromDocument();
+    if (saved) {
+      setTimeout(function() {
+        try {
+          loadDataIntoSheet(saved);
+          setStatus('已加载共享数据：' + saved.length + ' 行 × ' + (saved[0] ? saved[0].length : 0) + ' 列', 'ok');
+        } catch (e2) {}
+      }, 800);
+    } else {
+      setStatus('无共享数据，请从 Word 表格导入', 'working');
+    }
+  } catch (e) {
+    var container = document.getElementById('univer-app');
+    if (container) {
+      container.innerHTML = '<div class="fallback"><p><strong>初始化失败</strong></p><p>' + escHtml(e.message) + '</p></div>';
+    }
+    setStatus('初始化失败: ' + e.message, 'err');
+  }
+}
+
+(function() {
+  var maxWait = 100;
+  var waitCount = 0;
+  function checkInit() {
+    waitCount++;
+    var ok = (typeof UniverPresets !== 'undefined')
+          && (typeof UniverPresetSheetsCore !== 'undefined')
+          && (typeof UniverCore !== 'undefined')
+          && (typeof UniverPresetSheetsCoreZhCN !== 'undefined');
+    if (ok) {
+      initUniver();
+    } else if (waitCount < maxWait) {
+      setTimeout(checkInit, 200);
+    } else {
+      var have = {
+        UniverPresets: typeof UniverPresets,
+        UniverPresetSheetsCore: typeof UniverPresetSheetsCore,
+        UniverCore: typeof UniverCore,
+        UniverPresetSheetsCoreZhCN: typeof UniverPresetSheetsCoreZhCN
+      };
+      var c = document.getElementById('univer-app');
+      if (c) {
+        var rows = '';
+        for (var k in have) rows += '<tr><td style="padding:2px 8px;border:1px solid #ddd;">' + escHtml(k) + '</td><td style="padding:2px 8px;border:1px solid #ddd;">' + escHtml(have[k]) + '</td></tr>';
+        c.innerHTML = '<div class="fallback"><p><strong>Univer 组件加载失败</strong></p><p>核心脚本未就绪，当前状态：</p>'
+          + '<table style="margin:10px auto;border-collapse:collapse;font-family:Consolas,monospace;font-size:12px;">'
+          + '<tr style="background:#f0f0f0;"><th style="padding:2px 8px;border:1px solid #ddd;">全局变量</th><th style="padding:2px 8px;border:1px solid #ddd;">类型</th></tr>'
+          + rows + '</table></div>';
+      }
+      setStatus('加载失败：核心脚本未就绪', 'err');
+      try { console.error('[Univer-init-dialog] 失败状态', have); } catch(e) {}
+    }
+  }
+  checkInit();
+})();
+</script>
+</body>
+</html>

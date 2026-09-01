@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Word转Markdown</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 10px; margin: 0; }
+        p { margin: 8px 0 4px 0; font-size: 13px; }
+        button { padding: 8px 16px; margin-right: 6px; cursor: pointer; border-radius: 4px; border: none; font-size: 12px; }
+        .btn-primary { background: #2b579a; color: white; }
+        .btn-primary:hover { background: #1a3f6e; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #1e7e34; }
+        .btn-outline { background: white; border: 1px solid #2b579a; color: #2b579a; }
+        .btn-outline:hover { background: #2b579a; color: white; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .range-radios { font-size: 12px; margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+        .range-radios label { display: inline-flex; align-items: center; cursor: pointer; white-space: nowrap; }
+        .range-radios input[type="radio"] { margin-right: 4px; margin-left: 0; vertical-align: middle; }
+        .page-input-area { margin: 4px 0 6px 0; font-size: 12px; }
+        .page-input-area input { width: 180px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; }
+        .clipboard-area { margin: 4px 0 6px 0; }
+        .clipboard-area textarea { width: 100%; height: 60px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; box-sizing: border-box; resize: vertical; }
+        .output-options { display: flex; gap: 8px; margin: 8px 0; }
+        #statusText { color: #2b579a; font-size: 12px; margin-top: 8px; min-height: 20px; }
+        #previewArea { margin-top: 8px; }
+        #previewArea textarea { width: 100%; height: 280px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: Consolas, 'Courier New', monospace; font-size: 12px; box-sizing: border-box; resize: vertical; background: #fafafa; }
+        .info-tip { font-size: 11px; color: #888; margin: 2px 0 0 0; }
+    </style>
+</head>
+<body>
+    <p><b>1. 选择内容来源</b></p>
+    <div class="range-radios">
+        <label><input type="radio" name="sourceRange" value="all" checked> 全文</label>
+        <label><input type="radio" name="sourceRange" value="page"> 当前页</label>
+        <label><input type="radio" name="sourceRange" value="pages"> 指定页面</label>
+        <label><input type="radio" name="sourceRange" value="selection"> 鼠标选中</label>
+        <label><input type="radio" name="sourceRange" value="clipboard"> 粘贴板</label>
+    </div>
+    <div class="page-input-area" id="pageInputArea" style="display:none;">
+        页码（如 3 或 2-5）：<input id="pageInput" placeholder="例如：3 或 2-5" />
+    </div>
+    <div class="clipboard-area" id="clipboardArea" style="display:none;">
+        粘贴内容：<textarea id="clipboardText" placeholder="在此粘贴文本内容..."></textarea>
+    </div>
+
+    <button id="convertBtn" class="btn-primary">转换为 Markdown</button>
+
+    <p><b>2. 输出方式</b></p>
+    <div class="output-options">
+        <button id="copyBtn" class="btn-outline" disabled>复制到粘贴板</button>
+        <button id="newFileBtn" class="btn-success" disabled>输出到新文件(.md)</button>
+    </div>
+
+    <div id="previewArea">
+        <p><b>预览</b></p>
+        <textarea id="mdPreview" readonly placeholder="点击「转换为 Markdown」按钮后在此显示结果..."></textarea>
+    </div>
+
+    <p id="statusText">就绪</p>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    var statusEl;
+    var currentMd = '';
+    var mdPreviewEl;
+    var copyBtn;
+    var newFileBtn;
+
+    function getSourceType() {
+        var radios = document.getElementsByName('sourceRange');
+        for (var i = 0; i < radios.length; i++) { if (radios[i].checked) return radios[i].value; }
+        return 'all';
+    }
+
+    // ========== 段落文本转 Markdown ==========
+
+    function paraToMarkdown(paraData) {
+        var text = paraData.text || '';
+        var trimmed = text.trim();
+        if (!trimmed) return '\n';
+
+        var styleName = (paraData.style || '').toLowerCase();
+        var outlineLevel = paraData.outlineLevel || 0;
+        var headingLevel = 0;
+
+        if (outlineLevel > 0 && outlineLevel <= 9) {
+            headingLevel = outlineLevel;
+        } else if (styleName.indexOf('heading ') === 0 || styleName.indexOf('标题 ') === 0) {
+            var m = styleName.match(/(\d+)/);
+            if (m) headingLevel = parseInt(m[1]);
+        }
+
+        if (headingLevel > 0) {
+            var prefix = '';
+            for (var h = 0; h < headingLevel; h++) prefix += '#';
+            return prefix + ' ' + trimmed + '\n\n';
+        }
+
+        return trimmed + '\n\n';
+    }
+
+    // ========== 表格转 Markdown ==========
+
+    function tableToMarkdown(table) {
+        var md = '\n';
+        var rows = table.values;
+        var colCount = table.columnCount;
+        if (!rows || rows.length === 0) return '';
+        for (var r = 0; r < rows.length; r++) {
+            md += '|';
+            for (var c = 0; c < colCount; c++) {
+                md += ' ' + (rows[r][c] || '') + ' |';
+            }
+            md += '\n';
+            if (r === 0) {
+                md += '|';
+                for (var c2 = 0; c2 < colCount; c2++) {
+                    md += ' --- |';
+                }
+                md += '\n';
+            }
+        }
+        return md + '\n';
+    }
+
+    // ========== 核心转换 ==========
+
+    function doConvert() {
+        var sourceType = getSourceType();
+        mdPreviewEl.value = '转换中...';
+        copyBtn.disabled = true;
+        newFileBtn.disabled = true;
+        currentMd = '';
+
+        if (sourceType === 'clipboard') {
+            convertFromClipboard();
+            return;
+        }
+
+        Word.run(function(context) {
+            if (sourceType === 'all') return convertAll(context);
+            if (sourceType === 'page') return convertCurrentPage(context);
+            if (sourceType === 'pages') return convertSpecifiedPages(context);
+            if (sourceType === 'selection') return convertSelection(context);
+        }).catch(function(e) {
+            statusEl.textContent = '转换失败: ' + e.message;
+            mdPreviewEl.value = '';
+        });
+    }
+
+    function convertAll(context) {
+        statusEl.textContent = '读取全文...';
+        var body = context.document.body;
+        var paragraphs = body.paragraphs;
+        paragraphs.load('text,outlineLevel,style');
+        var tables = body.tables;
+        tables.load('values,rowCount,columnCount');
+        return context.sync().then(function() {
+            var md = '';
+            for (var i = 0; i < paragraphs.items.length; i++) {
+                md += paraToMarkdown({
+                    text: paragraphs.items[i].text,
+                    outlineLevel: paragraphs.items[i].outlineLevel,
+                    style: paragraphs.items[i].style
+                });
+            }
+            for (var t = 0; t < tables.items.length; t++) {
+                md += tableToMarkdown(tables.items[t]);
+            }
+            finishConvert(md, '转换完成 (全文)');
+        });
+    }
+
+    function convertCurrentPage(context) {
+        statusEl.textContent = '识别当前页...';
+        var body = context.document.body;
+        var allPars = body.paragraphs;
+        allPars.load('text,outlineLevel,style');
+        var selPars = context.document.getSelection().paragraphs;
+        selPars.load('text');
+        return context.sync().then(function() {
+            var selIdx = -1;
+            if (selPars.items.length > 0) {
+                var selText = selPars.items[0].text;
+                for (var i = 0; i < allPars.items.length; i++) {
+                    if (allPars.items[i].text === selText) { selIdx = i; break; }
+                }
+            }
+            if (selIdx < 0) { statusEl.textContent = '无法定位当前页，请将光标放在文档中'; mdPreviewEl.value = ''; return; }
+            var start = Math.max(0, selIdx - 12);
+            var end = Math.min(allPars.items.length, selIdx + 12);
+            var md = '';
+            for (var i = start; i < end; i++) {
+                md += paraToMarkdown({
+                    text: allPars.items[i].text,
+                    outlineLevel: allPars.items[i].outlineLevel,
+                    style: allPars.items[i].style
+                });
+            }
+            finishConvert(md, '转换完成 (段落 ' + (start + 1) + ' ~ ' + end + ')');
+        });
+    }
+
+    function convertSpecifiedPages(context) {
+        var pageStr = document.getElementById('pageInput').value.trim();
+        if (!pageStr) { statusEl.textContent = '请输入页面范围'; mdPreviewEl.value = ''; return; }
+        var range = parsePageRange(pageStr);
+        if (!range) { statusEl.textContent = '页码格式错误，请使用如 3 或 2-5'; mdPreviewEl.value = ''; return; }
+
+        statusEl.textContent = '读取第 ' + range.from + ' ~ ' + range.to + ' 页...';
+        var body = context.document.body;
+        var allPars = body.paragraphs;
+        allPars.load('text,outlineLevel,style');
+        var tables = body.tables;
+        tables.load('values,rowCount,columnCount');
+        return context.sync().then(function() {
+            var PP = 25; // approximate paragraphs per page
+            var start = Math.max(0, (range.from - 1) * PP);
+            var end = Math.min(allPars.items.length, range.to * PP);
+            var md = '';
+            for (var i = start; i < end; i++) {
+                md += paraToMarkdown({
+                    text: allPars.items[i].text,
+                    outlineLevel: allPars.items[i].outlineLevel,
+                    style: allPars.items[i].style
+                });
+            }
+            for (var t = 0; t < tables.items.length; t++) {
+                md += tableToMarkdown(tables.items[t]);
+            }
+            finishConvert(md, '转换完成 (第 ' + range.from + ' ~ ' + range.to + ' 页)');
+        });
+    }
+
+    function convertSelection(context) {
+        statusEl.textContent = '读取选中内容...';
+        var sel = context.document.getSelection();
+        var pars = sel.paragraphs;
+        pars.load('text,outlineLevel,style');
+        var tables = sel.tables;
+        tables.load('values,rowCount,columnCount');
+        return context.sync().then(function() {
+            var md = '';
+            for (var i = 0; i < pars.items.length; i++) {
+                md += paraToMarkdown({
+                    text: pars.items[i].text,
+                    outlineLevel: pars.items[i].outlineLevel,
+                    style: pars.items[i].style
+                });
+            }
+            for (var t = 0; t < tables.items.length; t++) {
+                md += tableToMarkdown(tables.items[t]);
+            }
+            finishConvert(md, '转换完成 (选中内容)');
+        });
+    }
+
+    function parsePageRange(str) {
+        var m = str.match(/^(\d+)$/);
+        if (m) { var n = parseInt(m[1]); return { from: n, to: n }; }
+        m = str.match(/^(\d+)\s*[-~]\s*(\d+)$/);
+        if (m) return { from: parseInt(m[1]), to: parseInt(m[2]) };
+        return null;
+    }
+
+    function finishConvert(md, msg) {
+        currentMd = md;
+        mdPreviewEl.value = md;
+        copyBtn.disabled = false;
+        newFileBtn.disabled = false;
+        statusEl.textContent = msg;
+    }
+
+    // ========== 粘贴板 ==========
+
+    function convertFromClipboard() {
+        var pastedText = document.getElementById('clipboardText').value.trim();
+        if (pastedText) {
+            // User already pasted text into the textarea
+            currentMd = pastedText;
+            mdPreviewEl.value = pastedText;
+            copyBtn.disabled = false;
+            newFileBtn.disabled = false;
+            statusEl.textContent = '已加载粘贴板内容 (纯文本)';
+            return;
+        }
+
+        // Try to read from Word's current selection as clipboard proxy
+        statusEl.textContent = '尝试读取选中内容作为粘贴板...';
+        Word.run(function(context) {
+            var sel = context.document.getSelection();
+            sel.load('text');
+            return context.sync().then(function() {
+                if (sel.text && sel.text.trim()) {
+                    currentMd = sel.text;
+                    mdPreviewEl.value = sel.text;
+                    copyBtn.disabled = false;
+                    newFileBtn.disabled = false;
+                    statusEl.textContent = '已读取选中文本';
+                } else {
+                    // Fallback: browser clipboard API
+                    if (navigator.clipboard && navigator.clipboard.readText) {
+                        navigator.clipboard.readText().then(function(text) {
+                            if (text) {
+                                currentMd = text;
+                                mdPreviewEl.value = text;
+                                copyBtn.disabled = false;
+                                newFileBtn.disabled = false;
+                                statusEl.textContent = '已从系统粘贴板读取';
+                            } else {
+                                statusEl.textContent = '粘贴板为空，请在上方文本框中手动粘贴';
+                                mdPreviewEl.value = '';
+                            }
+                        }).catch(function() {
+                            statusEl.textContent = '无法读取系统粘贴板，请在上方文本框手动粘贴';
+                            mdPreviewEl.value = '';
+                        });
+                    } else {
+                        statusEl.textContent = '请在上方文本框中手动粘贴内容';
+                        mdPreviewEl.value = '';
+                    }
+                }
+            });
+        }).catch(function() {
+            statusEl.textContent = '请在上方文本框中手动粘贴内容';
+            mdPreviewEl.value = '';
+        });
+    }
+
+    // ========== 输出 ==========
+
+    function doCopyToClipboard() {
+        if (!currentMd) { statusEl.textContent = '无内容可复制'; return; }
+        mdPreviewEl.focus();
+        mdPreviewEl.select();
+        try {
+            document.execCommand('copy');
+            statusEl.textContent = '已复制到粘贴板';
+        } catch (e) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(currentMd).then(function() {
+                    statusEl.textContent = '已复制到粘贴板';
+                }).catch(function() {
+                    statusEl.textContent = '复制失败，请手动 Ctrl+C';
+                });
+            } else {
+                statusEl.textContent = '复制失败，请手动 Ctrl+C';
+            }
+        }
+    }
+
+    function doOutputToNewFile() {
+        if (!currentMd) { statusEl.textContent = '无内容可输出'; return; }
+        statusEl.textContent = '生成文件...';
+
+        // Method 1: Create Word document and insert content
+        Word.run(function(context) {
+            var newDoc = context.application.createDocument();
+            return context.sync().then(function() {
+                newDoc.body.insertText(currentMd, Word.InsertLocation.end);
+                return context.sync().then(function() {
+                    statusEl.textContent = '已创建新 Word 文档，请使用「另存为」保存为 .md 格式';
+                });
+            });
+        }).catch(function() {
+            // Method 2: Fallback - blob download
+            try {
+                var blob = new Blob(['\uFEFF' + currentMd], { type: 'text/markdown;charset=utf-8' });
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'document.md';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(function() { URL.revokeObjectURL(url); }, 100);
+                statusEl.textContent = '已下载 document.md 文件';
+            } catch (e2) {
+                statusEl.textContent = '创建文件失败，请使用复制功能手动保存';
+            }
+        });
+    }
+
+    // ========== 初始化 ==========
+
+    Office.onReady(function(info) {
+        statusEl = document.getElementById('statusText');
+        mdPreviewEl = document.getElementById('mdPreview');
+        copyBtn = document.getElementById('copyBtn');
+        newFileBtn = document.getElementById('newFileBtn');
+
+        if (info.host !== Office.HostType.Word) {
+            statusEl.textContent = '请在 Word 中使用';
+            return;
+        }
+
+        statusEl.textContent = '就绪';
+
+        // 切换来源时显示/隐藏对应输入区
+        var rangeRadios = document.getElementsByName('sourceRange');
+        for (var i = 0; i < rangeRadios.length; i++) {
+            rangeRadios[i].onchange = function() {
+                var st = getSourceType();
+                document.getElementById('pageInputArea').style.display = (st === 'pages') ? 'block' : 'none';
+                document.getElementById('clipboardArea').style.display = (st === 'clipboard') ? 'block' : 'none';
+            };
+        }
+
+        document.getElementById('convertBtn').onclick = doConvert;
+        copyBtn.onclick = doCopyToClipboard;
+        newFileBtn.onclick = doOutputToNewFile;
+    });
+    </script>
+</body>
+</html>

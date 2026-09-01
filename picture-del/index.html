@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>批量删除图片</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 12px; margin: 0; font-size: 13px; background: #f0f0f0; }
+        .section { margin-bottom: 14px; }
+        .section-title { color: #c00000; font-weight: bold; margin-bottom: 6px; font-size: 13px; }
+        .radio-row { margin: 4px 0; }
+        .radio-row label { margin-right: 16px; cursor: pointer; }
+        .sub-options { margin-left: 20px; margin-top: 6px; display: none; }
+        .sub-options.active { display: block; }
+        .size-row { margin: 4px 0; display: flex; align-items: center; flex-wrap: wrap; }
+        .size-row label { display: inline-block; width: 36px; color: #666; }
+        .size-row input[type="text"] { width: 60px; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; }
+        .size-row span { margin: 0 6px; color: #666; font-size: 12px; }
+        .get-size-btn { background: #ffe0e0; border: 1px solid #c00000; color: #c00000; padding: 4px 10px; cursor: pointer; font-size: 12px; margin-left: 6px; }
+        .get-size-btn:hover { background: #ffc0c0; }
+        .tip { color: #666; font-size: 12px; margin-left: 6px; }
+        .divider { border: none; border-top: 1px solid #2e7d32; margin: 10px 0; }
+        .checkbox-row { margin: 6px 0; }
+        .checkbox-row label { margin-right: 14px; cursor: pointer; color: #333; font-size: 13px; }
+        .checkbox-row label.checked-label { color: #0078d4; }
+        .checkbox-row input { margin-right: 4px; }
+        .btn-area { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; }
+        .btn { padding: 6px 18px; font-size: 13px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; }
+        .btn:hover { background: #d0d0d0; }
+        #statusText { margin-top: 10px; font-size: 12px; color: #2b579a; min-height: 16px; word-break: break-all; }
+        .folder-row { display: flex; align-items: center; margin: 4px 0; }
+        .folder-row input[type="text"] { flex: 1; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; margin-right: 6px; }
+        .folder-row .browse-btn { padding: 4px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; white-space: nowrap; }
+        .folder-row .browse-btn:hover { background: #d0d0d0; }
+        .file-count { font-size: 11px; color: #666; margin-left: 6px; white-space: nowrap; }
+        .progress-bar { width: 100%; height: 6px; background: #ddd; margin-top: 6px; display: none; border-radius: 3px; overflow: hidden; }
+        .progress-bar .fill { height: 100%; background: #2b579a; width: 0%; transition: width 0.2s; }
+    </style>
+</head>
+<body>
+    <div class="section">
+        <div class="section-title">范围：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="scope" value="current" checked> 当前文档</label>
+            <label><input type="radio" name="scope" value="multiple"> 多个 Word 文档</label>
+        </div>
+        <div id="folderOptions" class="sub-options">
+            <div class="folder-row">
+                <input type="text" id="folderPath" placeholder="输入文件夹路径或点击浏览选择...">
+                <button id="browseBtn" class="browse-btn">选择文件夹</button>
+                <span id="fileCount" class="file-count"></span>
+            </div>
+            <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;" accept=".docx">
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">指定类型：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="targetType" value="all" checked> 全部图片</label>
+            <label><input type="radio" name="targetType" value="size"> 指定尺寸的图片</label>
+        </div>
+        <div id="sizeOptions" class="sub-options">
+            <div class="size-row">
+                <label>高</label>
+                <input type="text" id="heightInput" value="4.51">
+                <span>CM</span>
+                <label>宽</label>
+                <input type="text" id="widthInput" value="4.51">
+                <span>CM</span>
+            </div>
+            <div class="size-row">
+                <label>允许误差</label>
+                <span>±</span>
+                <input type="text" id="toleranceInput" value="0.02">
+                <span>CM</span>
+                <button id="getSizeBtn" class="get-size-btn">获取尺寸</button>
+                <span class="tip">若不知道尺寸，选中一张图片，点击【获取尺寸】</span>
+            </div>
+        </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="checkbox-row">
+        <label id="lblInline"><input type="checkbox" id="inlinePics" checked> 嵌入式图片</label>
+        <label id="lblShapes"><input type="checkbox" id="shapes" checked> 图形</label>
+        <label id="lblTextBoxes"><input type="checkbox" id="textBoxes"> 文本框</label>
+    </div>
+
+    <div class="btn-area">
+        <button id="defaultBtn" class="btn">默认设置</button>
+        <button id="okBtn" class="btn btn-primary">确 定</button>
+    </div>
+
+    <div id="progressBar" class="progress-bar"><div id="progressFill" class="fill"></div></div>
+
+    <p id="statusText">就绪</p>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    var statusEl, heightInput, widthInput, toleranceInput;
+    var folderPath, fileCount, folderInput, progressBar, progressFill;
+    var selectedFiles = [];
+    var CM_TO_POINT = 28.3464567;
+    var EMU_PER_CM = 360000;
+
+    function initUI() {
+        statusEl = document.getElementById('statusText');
+        heightInput = document.getElementById('heightInput');
+        widthInput = document.getElementById('widthInput');
+        toleranceInput = document.getElementById('toleranceInput');
+        folderPath = document.getElementById('folderPath');
+        fileCount = document.getElementById('fileCount');
+        folderInput = document.getElementById('folderInput');
+        progressBar = document.getElementById('progressBar');
+        progressFill = document.getElementById('progressFill');
+
+        var scopeRadios = document.getElementsByName('scope');
+        for (var i = 0; i < scopeRadios.length; i++) {
+            scopeRadios[i].onclick = onScopeChange;
+        }
+
+        var typeRadios = document.getElementsByName('targetType');
+        for (var i = 0; i < typeRadios.length; i++) {
+            typeRadios[i].onclick = onTypeChange;
+        }
+
+        document.getElementById('getSizeBtn').onclick = doGetSize;
+        document.getElementById('defaultBtn').onclick = doDefault;
+        document.getElementById('okBtn').onclick = doDelete;
+        document.getElementById('browseBtn').onclick = doBrowseFolder;
+        folderInput.onchange = onFolderSelected;
+
+        // 复选框选中时文字变蓝
+        var cbs = document.querySelectorAll('.checkbox-row input[type="checkbox"]');
+        for (var i = 0; i < cbs.length; i++) {
+            cbs[i].onchange = updateCheckboxStyle;
+        }
+
+        onScopeChange();
+        onTypeChange();
+        updateCheckboxStyle();
+    }
+
+    function updateCheckboxStyle() {
+        var cb = document.getElementById('inlinePics');
+        document.getElementById('lblInline').className = cb.checked ? 'checked-label' : '';
+        cb = document.getElementById('shapes');
+        document.getElementById('lblShapes').className = cb.checked ? 'checked-label' : '';
+        cb = document.getElementById('textBoxes');
+        document.getElementById('lblTextBoxes').className = cb.checked ? 'checked-label' : '';
+    }
+
+    function onScopeChange() {
+        var scope = getCheckedValue('scope');
+        var folderEl = document.getElementById('folderOptions');
+        folderEl.className = scope === 'multiple' ? 'sub-options active' : 'sub-options';
+        if (scope === 'current') {
+            statusEl.textContent = '就绪';
+        } else {
+            if (selectedFiles.length > 0) {
+                statusEl.textContent = '已选择 ' + selectedFiles.length + ' 个文件';
+            } else {
+                statusEl.textContent = '请选择文件夹路径';
+            }
+        }
+    }
+
+    function onTypeChange() {
+        var type = getCheckedValue('targetType');
+        document.getElementById('sizeOptions').className = type === 'size' ? 'sub-options active' : 'sub-options';
+    }
+
+    function getCheckedValue(name) {
+        var radios = document.getElementsByName(name);
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) return radios[i].value;
+        }
+        return '';
+    }
+
+    function doBrowseFolder() {
+        folderInput.click();
+    }
+
+    function onFolderSelected() {
+        selectedFiles = [];
+        var files = folderInput.files;
+        var count = 0;
+        for (var i = 0; i < files.length; i++) {
+            var name = files[i].name.toLowerCase();
+            if (name.endsWith('.docx') || name.endsWith('.doc')) {
+                selectedFiles.push(files[i]);
+                count++;
+            }
+        }
+        if (count > 0) {
+            folderPath.value = '已选择 ' + count + ' 个 Word 文件';
+            fileCount.textContent = '(' + count + '个)';
+            statusEl.textContent = '已选择 ' + count + ' 个文件，点击【确定】开始处理';
+        } else {
+            folderPath.value = '';
+            fileCount.textContent = '(未找到 .docx 文件)';
+            statusEl.textContent = '未在所选文件夹中找到 Word 文件';
+        }
+    }
+
+    function doDefault() {
+        document.getElementById('inlinePics').checked = true;
+        document.getElementById('shapes').checked = true;
+        document.getElementById('textBoxes').checked = false;
+        var typeRadios = document.getElementsByName('targetType');
+        typeRadios[0].checked = true;
+        var scopeRadios = document.getElementsByName('scope');
+        scopeRadios[0].checked = true;
+        onTypeChange();
+        onScopeChange();
+        updateCheckboxStyle();
+        heightInput.value = '4.51';
+        widthInput.value = '4.51';
+        toleranceInput.value = '0.02';
+        statusEl.textContent = '已恢复默认设置';
+    }
+
+    function doGetSize() {
+        statusEl.textContent = '正在获取选中图片尺寸...';
+        Word.run(function(context) {
+            var selection = context.document.getSelection();
+            var inlinePics = selection.inlinePictures;
+            var shapes = selection.shapes;
+            inlinePics.load('items');
+            shapes.load('items');
+            return context.sync().then(function() {
+                if (inlinePics.items.length > 0) {
+                    var pic = inlinePics.items[0];
+                    pic.load('width,height');
+                    return context.sync().then(function() {
+                        widthInput.value = (pic.width / CM_TO_POINT).toFixed(2);
+                        heightInput.value = (pic.height / CM_TO_POINT).toFixed(2);
+                        statusEl.textContent = '已获取嵌入式图片尺寸';
+                    });
+                } else if (shapes.items.length > 0) {
+                    var shape = shapes.items[0];
+                    shape.load('width,height');
+                    return context.sync().then(function() {
+                        widthInput.value = (shape.width / CM_TO_POINT).toFixed(2);
+                        heightInput.value = (shape.height / CM_TO_POINT).toFixed(2);
+                        statusEl.textContent = '已获取图形尺寸';
+                    });
+                } else {
+                    statusEl.textContent = '未选中图片或图形，请先选中一个对象';
+                }
+            });
+        }).catch(function(error) { statusEl.textContent = '获取失败: ' + error.message; });
+    }
+
+    function getOptions() {
+        return {
+            scope: getCheckedValue('scope'),
+            type: getCheckedValue('targetType'),
+            width: parseFloat(widthInput.value),
+            height: parseFloat(heightInput.value),
+            tolerance: parseFloat(toleranceInput.value),
+            includeInline: document.getElementById('inlinePics').checked,
+            includeShapes: document.getElementById('shapes').checked,
+            includeTextBoxes: document.getElementById('textBoxes').checked
+        };
+    }
+
+    // === 当前文档删除（通过 Word JS API） ===
+    function doDeleteCurrent(opts) {
+        Word.run(function(context) {
+            var body = context.document.body;
+            var report = { inline: 0, shapes: 0, textBoxes: 0 };
+
+            function matchesSize(w, h) {
+                if (opts.type !== 'size') return true;
+                var tw = opts.width * CM_TO_POINT;
+                var th = opts.height * CM_TO_POINT;
+                var tt = opts.tolerance * CM_TO_POINT;
+                return Math.abs(w - tw) <= tt && Math.abs(h - th) <= tt;
+            }
+
+            function processInline() {
+                var pics = body.inlinePictures;
+                pics.load('items');
+                return context.sync().then(function() {
+                    var toDelete = [];
+                    for (var i = 0; i < pics.items.length; i++) {
+                        var pic = pics.items[i];
+                        pic.load('width,height');
+                        toDelete.push(pic);
+                    }
+                    return context.sync().then(function() {
+                        for (var i = toDelete.length - 1; i >= 0; i--) {
+                            if (matchesSize(toDelete[i].width, toDelete[i].height)) {
+                                toDelete[i].delete();
+                                report.inline++;
+                            }
+                        }
+                        return context.sync();
+                    });
+                });
+            }
+
+            function processShapes() {
+                var shps = body.shapes;
+                shps.load('items');
+                return context.sync().then(function() {
+                    var toDelete = [];
+                    for (var i = 0; i < shps.items.length; i++) {
+                        var s = shps.items[i];
+                        s.load('width,height,type');
+                        toDelete.push(s);
+                    }
+                    return context.sync().then(function() {
+                        for (var i = toDelete.length - 1; i >= 0; i--) {
+                            var s = toDelete[i];
+                            var isTB = s.type === 'TextBox' || s.type === 'TextFrame';
+                            var del = false;
+                            if (isTB && opts.includeTextBoxes && matchesSize(s.width, s.height)) del = true;
+                            if (!isTB && opts.includeShapes && matchesSize(s.width, s.height)) del = true;
+                            if (del) { s.delete(); if (isTB) report.textBoxes++; else report.shapes++; }
+                        }
+                        return context.sync();
+                    });
+                });
+            }
+
+            var chain = context.sync().then(function(){});
+            if (opts.includeInline) chain = chain.then(processInline);
+            if (opts.includeShapes || opts.includeTextBoxes) chain = chain.then(processShapes);
+            return chain.then(function() {
+                var t = report.inline + report.shapes + report.textBoxes;
+                statusEl.textContent = '删除完成：共 ' + t + ' 个（嵌入式 ' + report.inline + '，图形 ' + report.shapes + '，文本框 ' + report.textBoxes + '）';
+            });
+        }).catch(function(error) { statusEl.textContent = '删除失败: ' + error.message; });
+    }
+
+    // === 多个文档处理（JSZip 解析 docx） ===
+    function doDeleteMultiple(opts) {
+        if (selectedFiles.length === 0) {
+            statusEl.textContent = '请先选择文件夹';
+            return;
+        }
+        if (!opts.includeInline && !opts.includeShapes && !opts.includeTextBoxes) {
+            statusEl.textContent = '请至少选择一种要删除的类型';
+            return;
+        }
+        if (opts.type === 'size' && (isNaN(opts.width) || isNaN(opts.height) || isNaN(opts.tolerance))) {
+            statusEl.textContent = '尺寸参数填写不正确';
+            return;
+        }
+
+        statusEl.textContent = '正在处理 ' + selectedFiles.length + ' 个文件...';
+        showProgress(0);
+        statusEl.style.color = '#2b579a';
+
+        // FIXME: JSZip 3.x 只支持 ESM，需要用 script src 引入 UMD 版本
+        // 用 setTimeout 确保 JSZip 已加载
+        if (typeof JSZip === 'undefined') {
+            statusEl.textContent = 'JSZip 未加载，请刷新页面重试';
+            return;
+        }
+
+        var total = selectedFiles.length;
+        var processed = [];
+        var idx = 0;
+
+        function processNext() {
+            if (idx >= total) {
+                finishMultiple(processed);
+                return;
+            }
+            var file = selectedFiles[idx];
+            statusEl.textContent = '正在处理 (' + (idx + 1) + '/' + total + '): ' + file.webkitRelativePath;
+            showProgress(Math.round((idx / total) * 100));
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                processOneDocx(e.target.result, file.name, opts).then(function(result) {
+                    processed.push({ name: file.name, data: result, changed: true });
+                    idx++;
+                    setTimeout(processNext, 50);
+                }).catch(function(err) {
+                    processed.push({ name: file.name, data: null, changed: false, error: err.message });
+                    idx++;
+                    setTimeout(processNext, 50);
+                });
+            };
+            reader.onerror = function() {
+                processed.push({ name: file.name, data: null, changed: false, error: '读取失败' });
+                idx++;
+                setTimeout(processNext, 50);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        processNext();
+    }
+
+    function processOneDocx(arrayBuffer, fileName, opts) {
+        return JSZip.loadAsync(arrayBuffer).then(function(zip) {
+            var docPath = 'word/document.xml';
+            var hasRels = zip.file('word/_rels/document.xml.rels') !== null;
+
+            return readZipText(zip, docPath).then(function(xmlStr) {
+                var parser = new DOMParser();
+                var xmlDoc = parser.parseFromString(xmlStr, 'text/xml');
+                var modified = false;
+                var deletedMediaIds = [];
+
+                // 处理 w:drawing 中的图片（DrawingML）
+                var drawings = xmlDoc.getElementsByTagNameNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'drawing');
+                // 也支持非命名空间版
+                if (drawings.length === 0) drawings = xmlDoc.getElementsByTagName('w:drawing');
+                var toRemove = [];
+                for (var i = 0; i < drawings.length; i++) {
+                    var dw = drawings[i];
+                    var shouldDelete = false;
+
+                    // 找到 wp:extent 或 a:ext 获取尺寸
+                    var extents = dw.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing', 'extent');
+                    if (extents.length === 0) extents = dw.getElementsByTagName('wp:extent');
+                    if (extents.length === 0) {
+                        // 也可能是 a:ext
+                        extents = dw.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'ext');
+                        if (extents.length === 0) extents = dw.getElementsByTagName('a:ext');
+                    }
+
+                    if (opts.type === 'all' || extents.length === 0) {
+                        shouldDelete = true;
+                    } else {
+                        var cx = parseInt(extents[0].getAttribute('cx') || '0', 10);
+                        var cy = parseInt(extents[0].getAttribute('cy') || '0', 10);
+                        var tw = opts.width * EMU_PER_CM;
+                        var th = opts.height * EMU_PER_CM;
+                        var tt = opts.tolerance * EMU_PER_CM;
+                        shouldDelete = Math.abs(cx - tw) <= tt && Math.abs(cy - th) <= tt;
+                    }
+
+                    if (shouldDelete) {
+                        // 收集 r:embed 引用
+                        var blips = dw.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'blip');
+                        if (blips.length === 0) blips = dw.getElementsByTagName('a:blip');
+                        for (var b = 0; b < blips.length; b++) {
+                            var embed = blips[b].getAttribute('r:embed') || blips[b].getAttribute('embed');
+                            if (embed) deletedMediaIds.push(embed);
+                        }
+                        toRemove.push(dw);
+                        modified = true;
+                    }
+                }
+                for (var r = 0; r < toRemove.length; r++) {
+                    var parent = toRemove[r].parentNode;
+                    if (parent) parent.removeChild(toRemove[r]);
+                }
+
+                // 处理 w:pict 中的 VML 图片
+                if (opts.type === 'all') {
+                    var picts = xmlDoc.getElementsByTagNameNS('urn:schemas-microsoft-com:vml', 'imagedata');
+                    if (picts.length === 0) picts = xmlDoc.getElementsByTagName('v:imagedata');
+                    var pictParents = [];
+                    for (var p = 0; p < picts.length; p++) {
+                        var rid = picts[p].getAttribute('r:id') || picts[p].getAttribute('id');
+                        if (rid) deletedMediaIds.push(rid);
+                        // 找到 w:pict 父节点
+                        var anc = picts[p].parentNode;
+                        while (anc) {
+                            if (anc.tagName === 'w:pict' || anc.tagName.indexOf('pict') !== -1) break;
+                            anc = anc.parentNode;
+                        }
+                        if (anc && pictParents.indexOf(anc) < 0) pictParents.push(anc);
+                    }
+                    for (var pp = 0; pp < pictParents.length; pp++) {
+                        var pparent = pictParents[pp].parentNode;
+                        if (pparent) pparent.removeChild(pictParents[pp]);
+                    }
+                    if (pictParents.length > 0) modified = true;
+                }
+
+                if (!modified) return arrayBuffer;
+
+                // 保存修改后的 XML
+                var serializer = new XMLSerializer();
+                var newXml = serializer.serializeToString(xmlDoc);
+                zip.file(docPath, newXml);
+
+                // 删除 media 文件（全部或按 rId）
+                if (opts.type === 'all') {
+                    // 删除全部 media 文件
+                    zip.folder('word/media').forEach(function(relativePath, file) {
+                        zip.remove('word/media/' + relativePath);
+                    });
+                } else if (deletedMediaIds.length > 0 && hasRels) {
+                    // 按 rId 查找并删除对应 media
+                    var relsPath = 'word/_rels/document.xml.rels';
+                    return readZipText(zip, relsPath).then(function(relsStr) {
+                        var relsDoc = new DOMParser().parseFromString(relsStr, 'text/xml');
+                        var relationships = relsDoc.getElementsByTagName('Relationship');
+                        for (var ri = 0; ri < relationships.length; ri++) {
+                            var rid = relationships[ri].getAttribute('Id');
+                            if (deletedMediaIds.indexOf(rid) >= 0) {
+                                var target = relationships[ri].getAttribute('Target');
+                                if (target && target.indexOf('media/') === 0) {
+                                    zip.remove('word/' + target);
+                                }
+                            }
+                        }
+                        return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+                    });
+                }
+
+                return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+            });
+        });
+    }
+
+    function readZipText(zip, path) {
+        var file = zip.file(path);
+        if (!file) return Promise.resolve('');
+        return file.async('text');
+    }
+
+    function finishMultiple(processed) {
+        showProgress(100);
+        var changed = [];
+        var errors = [];
+        for (var i = 0; i < processed.length; i++) {
+            if (processed[i].changed && processed[i].data) changed.push(processed[i]);
+            if (!processed[i].changed) errors.push(processed[i].name);
+        }
+
+        if (changed.length === 0) {
+            statusEl.textContent = '处理完成，但未找到需要删除的图片。共处理 ' + processed.length + ' 个文件。';
+            hideProgress();
+            return;
+        }
+
+        statusEl.textContent = '正在打包下载...';
+
+        if (changed.length === 1) {
+            // 单个文件直接下载
+            var blob = new Blob([changed[0].data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            triggerDownload(blob, changed[0].name);
+            statusEl.textContent = '处理完成：1 个文件已下载' + (errors.length > 0 ? '（' + errors.length + ' 个无变化）' : '');
+        } else {
+            // 多个文件打包成 zip 下载
+            var outZip = new JSZip();
+            for (var i = 0; i < changed.length; i++) {
+                outZip.file(changed[i].name, changed[i].data);
+            }
+            outZip.generateAsync({ type: 'blob', compression: 'DEFLATE' }).then(function(content) {
+                triggerDownload(content, '批量删除图片结果.zip');
+                statusEl.textContent = '处理完成：' + changed.length + ' 个文件已打包下载' + (errors.length > 0 ? '（' + errors.length + ' 个无变化）' : '');
+            });
+        }
+        hideProgress();
+    }
+
+    function triggerDownload(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    function showProgress(pct) {
+        progressBar.style.display = 'block';
+        progressFill.style.width = pct + '%';
+    }
+
+    function hideProgress() {
+        setTimeout(function() {
+            progressBar.style.display = 'none';
+            progressFill.style.width = '0%';
+        }, 2000);
+    }
+
+    function doDelete() {
+        var opts = getOptions();
+
+        if (opts.scope === 'multiple') {
+            doDeleteMultiple(opts);
+        } else {
+            // 当前文档
+            if (!opts.includeInline && !opts.includeShapes && !opts.includeTextBoxes) {
+                statusEl.textContent = '请至少选择一种要删除的类型';
+                return;
+            }
+            if (opts.type === 'size' && (isNaN(opts.width) || isNaN(opts.height) || isNaN(opts.tolerance))) {
+                statusEl.textContent = '尺寸参数填写不正确';
+                return;
+            }
+            statusEl.textContent = '正在删除...';
+            statusEl.style.color = '#2b579a';
+            doDeleteCurrent(opts);
+        }
+    }
+
+    Office.onReady(function(info) {
+        initUI();
+        if (info.host !== Office.HostType.Word) {
+            statusEl.textContent = '请在 Word 中使用';
+        }
+    });
+    </script>
+</body>
+</html>

@@ -1,0 +1,1475 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Word 批量处理</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            padding: 12px;
+            margin: 0;
+            font-size: 13px;
+            color: #333;
+            background: #f5f5f5;
+        }
+        h2 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            color: #2b579a;
+            border-bottom: 2px solid #2b579a;
+            padding-bottom: 6px;
+        }
+        h3 {
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            color: #555;
+        }
+
+        /* 统一卡片样式 */
+        .card {
+            background: #fff;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* 文件选择区 */
+        #fileList { font-size:11px; color:#888; margin-top:6px; max-height:100px; overflow-y:auto; }
+        #fileList .file-item { padding:2px 0; border-bottom:1px solid #f0f0f0; }
+
+        /* 功能模块卡片 */
+        .module-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            transition: border-color 0.2s;
+        }
+        .module-card.enabled { border-color: #2b579a; background: #f8faff; }
+        .module-card.disabled { opacity: 0.6; }
+
+        .module-header {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .module-header input[type="checkbox"] {
+            width: 16px; height: 16px;
+            margin-right: 8px;
+            cursor: pointer;
+            accent-color: #2b579a;
+            flex-shrink: 0;
+        }
+        .module-name {
+            font-weight: bold;
+            font-size: 13px;
+            flex: 1;
+        }
+        .module-desc {
+            font-size: 11px;
+            color: #888;
+            margin-left: 4px;
+        }
+        .module-arrow {
+            font-size: 10px;
+            color: #999;
+            margin-left: 6px;
+            transition: transform 0.2s;
+        }
+        .module-card.enabled .module-arrow { transform: rotate(90deg); }
+
+        /* 模块设置区 */
+        .module-settings {
+            display: none;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px dashed #ddd;
+        }
+        .module-card.enabled .module-settings { display: block; }
+
+        /* 单选按钮组 */
+        .radio-group { display: flex; gap: 16px; align-items: center; }
+        .radio-group label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            transition: all 0.15s;
+        }
+        .radio-group label.active {
+            background: #2b579a;
+            color: #fff;
+            border-color: #2b579a;
+        }
+        .radio-group input[type="radio"] { display: none; }
+
+        /* 按钮 */
+        .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        button {
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            border: none;
+            font-size: 12px;
+            font-weight: bold;
+            transition: opacity 0.15s;
+        }
+        button:hover { opacity: 0.85; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-primary { background: #2b579a; color: #fff; }
+        .btn-outline { background: #fff; color: #2b579a; border: 2px solid #2b579a; }
+        .btn-success { background: #00897b; color: #fff; }
+        .btn-small { padding: 4px 10px; font-size: 11px; }
+
+        /* 进度条 */
+        .progress-bar {
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #2b579a;
+            border-radius: 2px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        /* 结果区 */
+        #resultArea {
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 11px;
+            line-height: 1.6;
+        }
+        .result-ok { color: #2e7d32; }
+        .result-err { color: #c62828; }
+        .result-nochange { color: #888; }
+
+        #statusText { font-size: 11px; color: #2b579a; margin-top: 4px; min-height: 16px; }
+    </style>
+</head>
+<body>
+
+<h2>Word 批量处理</h2>
+
+<!-- ====== 文件选择区 ====== -->
+<div class="card">
+    <h3>📁 选择要处理的文件</h3>
+    <div class="btn-row" style="margin-bottom:6px;">
+        <button id="selectBtn" class="btn-outline" onclick="doSelectFiles()">选择 .docx 文件</button>
+        <button id="selectFolderBtn" class="btn-outline" onclick="doSelectFolder()">选择文件夹</button>
+        <button id="clearFilesBtn" class="btn-small btn-outline" style="display:none;" onclick="doClearFiles()">清空</button>
+    </div>
+    <div style="font-size:10px;color:#aaa;margin-bottom:4px;">
+        提示：选择文件夹后会自动搜索该文件夹及所有子文件夹中的 .docx 文件
+    </div>
+    <div id="fileList">未选择文件</div>
+</div>
+
+<!-- ====== 功能模块区 ====== -->
+<div class="card">
+    <h3>⚙️ 处理功能（勾选要执行的操作）</h3>
+    <div id="moduleList">
+        <!-- 模块由JS动态生成 -->
+    </div>
+</div>
+
+<!-- ====== 输出方式 ====== -->
+<div class="card">
+    <h3>💾 输出方式</h3>
+    <div class="radio-group" style="margin-bottom:6px;">
+        <label id="outOverwrite" class="active" style="font-size:12px;">
+            <input type="radio" name="outputMode" value="overwrite" checked> 覆盖原文件
+        </label>
+        <label id="outSuffix" class="" style="font-size:12px;">
+            <input type="radio" name="outputMode" value="suffix"> 另存为新文件
+        </label>
+    </div>
+    <div id="suffixRow" style="display:none;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:#888;">文件后缀:</span>
+        <input type="text" id="suffixInput" value="_已处理" maxlength="30"
+            style="width:100px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:12px;">
+        <span style="font-size:10px;color:#aaa;">例: 报告.docx → 报告_已处理.docx</span>
+    </div>
+</div>
+
+<!-- ====== 操作按钮 ====== -->
+<div class="card">
+    <div class="btn-row">
+        <button id="processBtn" class="btn-primary" disabled onclick="doProcess()">开始批量处理</button>
+        <button id="downloadBtn" class="btn-success" disabled style="display:none;" onclick="doDownload()">下载结果 (ZIP)</button>
+    </div>
+    <div class="progress-bar" id="progressBar" style="display:none;">
+        <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div id="statusText">就绪 — 请先选择文件并勾选处理功能</div>
+</div>
+
+<!-- ====== 自定义确认对话框（替代 confirm） ====== -->
+<div id="confirmOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.4);z-index:9999;justify-content:center;align-items:center;">
+    <div style="background:#fff;border-radius:8px;padding:20px 24px;max-width:500px;width:90%;
+        box-shadow:0 4px 20px rgba(0,0,0,0.25);">
+        <div style="font-size:14px;font-weight:bold;margin-bottom:10px;color:#333;">确认覆盖文件</div>
+        <div id="confirmBody" style="font-size:12px;color:#555;max-height:250px;overflow-y:auto;
+            white-space:pre-wrap;line-height:1.6;margin-bottom:14px;"></div>
+        <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+            <button id="confirmCancel" class="btn-outline" style="font-size:12px;padding:6px 16px;">取消</button>
+            <button id="confirmOk" class="btn-primary" style="font-size:12px;padding:6px 16px;">确认覆盖</button>
+        </div>
+    </div>
+</div>
+
+<!-- ====== 结果区 ====== -->
+<div class="card" id="resultCard" style="display:none;">
+    <h3>📋 处理结果</h3>
+    <div id="resultArea"></div>
+</div>
+
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+/* ================================================================
+   Word 批量处理工具 - 模块化框架
+   所有功能模块在此注册，支持多模块并行处理
+   ================================================================ */
+
+var WML_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+/* ---- 全局状态 ---- */
+var batchHandles = {};   // {filename: FileSystemFileHandle}  可读可写的文件句柄
+var batchFiles = {};     // {filename: File}                  用于读取内容（备份）
+var batchResults = [];   // [{name, ok, msg, blob}]
+
+/* ---- 模块注册表 ---- */
+var MODULES = [];
+
+function registerModule(mod) {
+    MODULES.push(mod);
+}
+
+/* ================================================================
+   模块1: 页面方向（横向/纵向）
+   ================================================================ */
+registerModule({
+    id: 'orientation',
+    name: '页面方向',
+    desc: '将文档页面设置为横向或纵向',
+    defaultSettings: { direction: 'portrait' },  // 'portrait' | 'landscape'
+
+    renderSettings: function(container, settings) {
+        container.innerHTML = ''
+            + '<div class="radio-group">'
+            + '  <label id="orientPortrait" class="active">'
+            + '    <input type="radio" name="orientation" value="portrait" checked> 纵向'
+            + '  </label>'
+            + '  <label id="orientLandscape" class="">'
+            + '    <input type="radio" name="orientation" value="landscape"> 横向'
+            + '  </label>'
+            + '</div>';
+
+        if (settings.direction === 'landscape') {
+            document.getElementById('orientPortrait').className = '';
+            document.getElementById('orientLandscape').className = 'active';
+            container.querySelector('input[value="landscape"]').checked = true;
+        }
+
+        var radios = container.querySelectorAll('label');
+        for (var i = 0; i < radios.length; i++) {
+            radios[i].onclick = function() {
+                var allLabels = container.querySelectorAll('label');
+                for (var j = 0; j < allLabels.length; j++) { allLabels[j].className = ''; }
+                this.className = 'active';
+            };
+        }
+    },
+
+    getSettings: function(container) {
+        var checked = container.querySelector('input[name="orientation"]:checked');
+        return { direction: checked ? checked.value : 'portrait' };
+    },
+
+    process: function(zip, settings, callback) {
+        var targetOrient = settings.direction;
+        var docEntry = zip.file('word/document.xml');
+        if (!docEntry) { callback(false, '找不到 word/document.xml'); return; }
+
+        docEntry.async('string').then(function(xmlString) {
+            var parser = new DOMParser();
+            var xmlDoc = parser.parseFromString(xmlString, 'text/xml');
+
+            // 查找所有 w:pgSz 元素（可能在 body 末尾 sectPr 或段落内的 sectPr 中）
+            var pgSzElements = findAllPgSz(xmlDoc);
+            if (pgSzElements.length === 0) {
+                callback(false, '未找到页面设置（pgSz）');
+                return;
+            }
+
+            var changed = 0;
+            for (var i = 0; i < pgSzElements.length; i++) {
+                var pgSz = pgSzElements[i];
+                var currentOrient = pgSz.getAttribute('w:orient') || 'portrait';
+
+                if (currentOrient === targetOrient) {
+                    continue; // 已经是目标方向，跳过
+                }
+
+                // 获取当前宽高
+                var w = pgSz.getAttribute('w:w');
+                var h = pgSz.getAttribute('w:h');
+
+                // 交换宽高并设置方向
+                if (w && h) {
+                    pgSz.setAttribute('w:w', h);
+                    pgSz.setAttribute('w:h', w);
+                }
+                pgSz.setAttribute('w:orient', targetOrient);
+                changed++;
+            }
+
+            if (changed > 0) {
+                var newXml = new XMLSerializer().serializeToString(xmlDoc);
+                zip.file('word/document.xml', newXml);
+                callback(true, '已将 ' + changed + ' 个节设置为' + (targetOrient === 'landscape' ? '横向' : '纵向'));
+            } else {
+                callback(true, '已全部是' + (targetOrient === 'landscape' ? '横向' : '纵向') + '，无需修改');
+            }
+        }).catch(function(err) {
+            callback(false, '解析失败: ' + (err && err.message || err));
+        });
+    }
+});
+
+/* ================================================================
+   模块2: 页码（页眉/页脚，自定义格式）
+   ================================================================ */
+var RELS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+var CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types';
+var REL_HEADER = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/header';
+var REL_FOOTER = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer';
+var CT_HEADER = 'application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml';
+var CT_FOOTER = 'application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml';
+
+registerModule({
+    id: 'pagenumber',
+    name: '设置页码',
+    desc: '在页眉或页脚插入页码，支持自定义格式',
+    defaultSettings: {
+        position: 'footer',    // 'header' | 'footer'
+        alignment: 'center',   // 'left' | 'center' | 'right'
+        format: '第{PAGE}页，共{NUMPAGES}页'
+    },
+
+    renderSettings: function(container, settings) {
+        var posHeader = settings.position === 'header' ? ' active' : '';
+        var posFooter = settings.position === 'footer' ? ' active' : '';
+        var posHeaderChk = settings.position === 'header' ? ' checked' : '';
+        var posFooterChk = settings.position === 'footer' ? ' checked' : '';
+
+        var alLeft = settings.alignment === 'left' ? ' active' : '';
+        var alCenter = settings.alignment === 'center' ? ' active' : '';
+        var alRight = settings.alignment === 'right' ? ' active' : '';
+        var alLeftChk = settings.alignment === 'left' ? ' checked' : '';
+        var alCenterChk = settings.alignment === 'center' ? ' checked' : '';
+        var alRightChk = settings.alignment === 'right' ? ' checked' : '';
+
+        container.innerHTML = ''
+            + '<div style="margin-bottom:8px;">'
+            + '  <span style="font-size:11px;color:#888;margin-right:8px;">位置：</span>'
+            + '  <span class="radio-group" style="display:inline-flex;">'
+            + '    <label id="pnPosHeader" class="' + posHeader + '" style="font-size:11px;">'
+            + '      <input type="radio" name="pnPosition" value="header"' + posHeaderChk + '> 页眉'
+            + '    </label>'
+            + '    <label id="pnPosFooter" class="' + posFooter + '" style="font-size:11px;">'
+            + '      <input type="radio" name="pnPosition" value="footer"' + posFooterChk + '> 页脚'
+            + '    </label>'
+            + '  </span>'
+            + '</div>'
+            + '<div style="margin-bottom:8px;">'
+            + '  <span style="font-size:11px;color:#888;margin-right:8px;">对齐：</span>'
+            + '  <span class="radio-group" style="display:inline-flex;">'
+            + '    <label id="pnAlignLeft" class="' + alLeft + '" style="font-size:11px;">'
+            + '      <input type="radio" name="pnAlign" value="left"' + alLeftChk + '> 左'
+            + '    </label>'
+            + '    <label id="pnAlignCenter" class="' + alCenter + '" style="font-size:11px;">'
+            + '      <input type="radio" name="pnAlign" value="center"' + alCenterChk + '> 中'
+            + '    </label>'
+            + '    <label id="pnAlignRight" class="' + alRight + '" style="font-size:11px;">'
+            + '      <input type="radio" name="pnAlign" value="right"' + alRightChk + '> 右'
+            + '    </label>'
+            + '  </span>'
+            + '</div>'
+            + '<div>'
+            + '  <span style="font-size:11px;color:#888;margin-right:8px;">格式：</span>'
+            + '  <input type="text" id="pnFormat" value="' + escHtml(settings.format) + '" maxlength="60"'
+            + '    style="width:250px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:12px;">'
+            + '  <div style="font-size:10px;color:#aaa;margin-top:4px;margin-left:48px;">'
+            + '    可用变量：{PAGE}=当前页码，{NUMPAGES}=总页数。例：第{PAGE}页/共{NUMPAGES}页'
+            + '  </div>'
+            + '</div>';
+
+        bindRadioGroup(container, 'pnPosition', ['pnPosHeader', 'pnPosFooter']);
+        bindRadioGroup(container, 'pnAlign', ['pnAlignLeft', 'pnAlignCenter', 'pnAlignRight']);
+    },
+
+    getSettings: function(container) {
+        var posEl = container.querySelector('input[name="pnPosition"]:checked');
+        var alignEl = container.querySelector('input[name="pnAlign"]:checked');
+        var formatEl = document.getElementById('pnFormat');
+        return {
+            position: posEl ? posEl.value : 'footer',
+            alignment: alignEl ? alignEl.value : 'center',
+            format: formatEl ? formatEl.value.trim() || '第{PAGE}页，共{NUMPAGES}页' : '第{PAGE}页，共{NUMPAGES}页'
+        };
+    },
+
+    process: function(zip, settings, callback) {
+        var position = settings.position;       // 'header' | 'footer'
+        var alignment = settings.alignment;     // 'left' | 'center' | 'right'
+        var format = settings.format;
+
+        var docXmlEntry = zip.file('word/document.xml');
+        if (!docXmlEntry) { callback(false, '找不到 word/document.xml'); return; }
+
+        docXmlEntry.async('string').then(function(docXmlStr) {
+            // 步骤1: 解析 document.xml，找到 sectPr
+            var docParser = new DOMParser();
+            var docXml = docParser.parseFromString(docXmlStr, 'text/xml');
+            var sectPrList = findSectPr(docXml);
+            if (sectPrList.length === 0) {
+                callback(false, '未找到节属性（sectPr）');
+                return;
+            }
+
+            // 查找已有引用
+            var refTag = position === 'header' ? 'headerReference' : 'footerReference';
+            var existingRId = null;
+            for (var si = 0; si < sectPrList.length; si++) {
+                var refs = findAllByTagNameNS(sectPrList[si], WML_NS, refTag);
+                for (var ri = 0; ri < refs.length; ri++) {
+                    var rType = refs[ri].getAttribute('w:type') || 'default';
+                    if (rType === 'default') {
+                        existingRId = refs[ri].getAttribute('r:id');
+                        break;
+                    }
+                }
+                if (existingRId) break;
+            }
+
+            if (existingRId) {
+                // 已有 header/footer → 修改已有文件
+                resolveAndModifyPart(zip, existingRId, position, alignment, format, callback);
+            } else {
+                // 没有 → 创建新的 header/footer part
+                createNewPart(zip, docXml, sectPrList[0], position, alignment, format, callback);
+            }
+        }).catch(function(err) {
+            callback(false, '解析 document.xml 失败: ' + (err && err.message || err));
+        });
+    }
+});
+
+
+
+// ---- 绑定 radio group 点击事件 ----
+function bindRadioGroup(container, name, labelIds) {
+    for (var i = 0; i < labelIds.length; i++) {
+        (function(lid) {
+            var label = document.getElementById(lid);
+            if (!label) return;
+            label.onclick = function() {
+                var allLabels = container.querySelectorAll('input[name="' + name + '"]');
+                for (var j = 0; j < allLabels.length; j++) {
+                    allLabels[j].parentNode.className = allLabels[j].parentNode.className.replace(/\s*active/g, '');
+                }
+                label.querySelector('input').checked = true;
+                label.className += ' active';
+            };
+        })(labelIds[i]);
+    }
+}
+
+// ---- 按命名空间 + 标签名查找元素（兜底多种方式） ----
+function findAllByTagNameNS(parent, ns, localName) {
+    var results = [];
+    var a = parent.getElementsByTagNameNS(ns, localName);
+    for (var i = 0; i < a.length; i++) results.push(a[i]);
+    if (results.length === 0) {
+        var b = parent.getElementsByTagName('w:' + localName);
+        for (var j = 0; j < b.length; j++) results.push(b[j]);
+    }
+    if (results.length === 0) {
+        var c = parent.getElementsByTagName(localName);
+        for (var k = 0; k < c.length; k++) results.push(c[k]);
+    }
+    return results;
+}
+
+// ---- 查找 word/document.xml 中的所有 sectPr ----
+function findSectPr(docXml) {
+    var results = [];
+    var nsList = docXml.getElementsByTagNameNS(WML_NS, 'sectPr');
+    for (var i = 0; i < nsList.length; i++) results.push(nsList[i]);
+    if (results.length === 0) {
+        var noNs = docXml.getElementsByTagName('w:sectPr');
+        for (var j = 0; j < noNs.length; j++) results.push(noNs[j]);
+    }
+    if (results.length === 0) {
+        var bare = docXml.getElementsByTagName('sectPr');
+        for (var k = 0; k < bare.length; k++) results.push(bare[k]);
+    }
+    return results;
+}
+
+// ====== 构建含页码的段落 XML 字符串 ======
+function buildPageNumberParagraph(format, alignment) {
+    // 解析格式字符串，将 {PAGE}/{NUMPAGES} 替换为字段代码
+    var runs = [];
+    var regex = /\{PAGE\}|\{NUMPAGES\}/g;
+    var lastIndex = 0;
+    var match;
+
+    while ((match = regex.exec(format)) !== null) {
+        // 前面的纯文本
+        if (match.index > lastIndex) {
+            var text = format.substring(lastIndex, match.index);
+            runs.push('<w:r><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">' + escXml(text) + '</w:t></w:r>');
+        }
+        // 字段代码
+        var fieldCode = match[0] === '{PAGE}' ? ' PAGE ' : ' NUMPAGES ';
+        runs.push('<w:r><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:sz w:val="18"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>');
+        runs.push('<w:r><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:sz w:val="18"/></w:rPr><w:instrText xml:space="preserve">' + fieldCode + '</w:instrText></w:r>');
+        runs.push('<w:r><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:sz w:val="18"/></w:rPr><w:fldChar w:fldCharType="separate"/></w:r>');
+        runs.push('<w:r><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:sz w:val="18"/></w:rPr><w:t>1</w:t></w:r>');
+        runs.push('<w:r><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:sz w:val="18"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>');
+        lastIndex = match.index + match[0].length;
+    }
+    // 剩余纯文本
+    if (lastIndex < format.length) {
+        var tailText = format.substring(lastIndex);
+        runs.push('<w:r><w:rPr><w:rFonts w:ascii="宋体" w:hAnsi="宋体" w:eastAsia="宋体"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">' + escXml(tailText) + '</w:t></w:r>');
+    }
+
+    return '<w:p>'
+        + '<w:pPr><w:jc w:val="' + alignment + '"/></w:pPr>'
+        + runs.join('')
+        + '</w:p>';
+}
+
+// ====== 修改已有的 header/footer 文件 ======
+function resolveAndModifyPart(zip, rId, position, alignment, format, callback) {
+    var relsEntry = zip.file('word/_rels/document.xml.rels');
+    if (!relsEntry) { callback(false, '找不到 rels 文件'); return; }
+
+    relsEntry.async('string').then(function(relsStr) {
+        // 解析 rels 找到对应 rId 的 Target
+        var relsParser = new DOMParser();
+        var relsXml = relsParser.parseFromString(relsStr, 'text/xml');
+        var relationships = relsXml.getElementsByTagNameNS(RELS_NS, 'Relationship');
+        if (relationships.length === 0) {
+            relationships = relsXml.getElementsByTagName('Relationship');
+        }
+        var target = null;
+        for (var i = 0; i < relationships.length; i++) {
+            if (relationships[i].getAttribute('Id') === rId) {
+                target = relationships[i].getAttribute('Target');
+                break;
+            }
+        }
+        if (!target) { callback(false, '找不到关系 rId=' + rId); return; }
+
+        var partPath = 'word/' + target;
+        var partEntry = zip.file(partPath);
+        if (!partEntry) { callback(false, '找不到 ' + partPath); return; }
+
+        partEntry.async('string').then(function(partStr) {
+            // 解析已有 header/footer
+            var partParser = new DOMParser();
+            var partXml = partParser.parseFromString(partStr, 'text/xml');
+            var bodyEl = partXml.documentElement;
+            if (!bodyEl) { callback(false, '解析 ' + partPath + ' 失败'); return; }
+
+            // 构建新段落
+            var newParaXml = buildPageNumberParagraph(format, alignment);
+            var newParaDoc = new DOMParser().parseFromString('<root xmlns:w="' + WML_NS + '">' + newParaXml + '</root>', 'text/xml');
+            var newPara = newParaDoc.documentElement.firstChild;
+
+            // 导入到目标文档
+            var importedPara = partXml.importNode(newPara, true);
+
+            // 清除已有段落，追加新段落
+            var existingParas = findAllByTagNameNS(bodyEl, WML_NS, 'p');
+            // 删除所有已有段落
+            for (var ep = existingParas.length - 1; ep >= 0; ep--) {
+                existingParas[ep].parentNode.removeChild(existingParas[ep]);
+            }
+            bodyEl.appendChild(importedPara);
+
+            var newXml = new XMLSerializer().serializeToString(partXml);
+            zip.file(partPath, newXml);
+            callback(true, '已在' + (position === 'header' ? '页眉' : '页脚') + '中设置页码');
+        }).catch(function(err) {
+            callback(false, '读取 ' + partPath + ' 失败');
+        });
+    }).catch(function(err) {
+        callback(false, '读取 rels 失败');
+    });
+}
+
+// ====== 创建新的 header/footer part ======
+function createNewPart(zip, docXml, sectPr, position, alignment, format, callback) {
+    // 步骤A: 确定新 part 的文件名
+    var prefix = position === 'header' ? 'header' : 'footer';
+    var maxIdx = 0;
+    var allFiles = Object.keys(zip.files);
+    for (var i = 0; i < allFiles.length; i++) {
+        var fname = allFiles[i];
+        var match = fname.match(new RegExp('word/' + prefix + '(\\d+)\\.xml$'));
+        if (match) {
+            var idx = parseInt(match[1], 10);
+            if (idx > maxIdx) maxIdx = idx;
+        }
+    }
+    var newIdx = maxIdx + 1;
+    var partFileName = prefix + newIdx + '.xml';
+    var partPath = 'word/' + partFileName;
+
+    // 生成不冲突的 rId
+    var allRelsEntry = zip.file('word/_rels/document.xml.rels');
+    var ctEntry = zip.file('[Content_Types].xml');
+
+    // 先读取 rels 确定可用 rId
+    allRelsEntry.async('string').then(function(relsContent) {
+        // 查找最大 rId 编号
+        var maxRId = 0;
+        var rIdMatch;
+        var rIdRegex = /Id="rId(\d+)"/g;
+        while ((rIdMatch = rIdRegex.exec(relsContent)) !== null) {
+            var n = parseInt(rIdMatch[1], 10);
+            if (n > maxRId) maxRId = n;
+        }
+        var newRId = 'rId' + (maxRId + 1);
+
+        // 步骤B: 构建 header/footer XML 内容
+        var rootTag = position === 'header' ? 'hdr' : 'ftr';
+        var headerFooterXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            + '<w:' + rootTag + ' xmlns:w="' + WML_NS + '"'
+            + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+            + ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
+            + ' xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"'
+            + ' xmlns:o="urn:schemas-microsoft-com:office:office"'
+            + ' xmlns:v="urn:schemas-microsoft-com:vml"'
+            + '>'
+            + buildPageNumberParagraph(format, alignment)
+            + '</w:' + rootTag + '>';
+
+        zip.file(partPath, headerFooterXml);
+
+        // 步骤C: 更新 [Content_Types].xml
+        return ctEntry.async('string').then(function(ctContent) {
+            var overrideXml = '<Override PartName="/' + partPath + '" ContentType="'
+                + (position === 'header' ? CT_HEADER : CT_FOOTER) + '"/>';
+            if (ctContent.indexOf('/' + partPath + '"') < 0) {
+                ctContent = ctContent.replace('</Types>', '  ' + overrideXml + '\n</Types>');
+            }
+            zip.file('[Content_Types].xml', ctContent);
+            return { relsContent: relsContent, newRId: newRId };
+        });
+    }).then(function(ctx) {
+        // 步骤D: 更新 word/_rels/document.xml.rels
+        var relsContent = ctx.relsContent;
+        var newRId = ctx.newRId;
+        var relXml = '<Relationship Id="' + newRId + '" Type="'
+            + (position === 'header' ? REL_HEADER : REL_FOOTER)
+            + '" Target="' + partFileName + '"/>';
+        if (relsContent.indexOf('Id="' + newRId + '"') < 0) {
+            relsContent = relsContent.replace('</Relationships>', '  ' + relXml + '\n</Relationships>');
+        }
+        zip.file('word/_rels/document.xml.rels', relsContent);
+
+        // 步骤E: 更新 document.xml — 在 sectPr 中添加引用
+        var refTag = position === 'header' ? 'headerReference' : 'footerReference';
+        var refElement = sectPr.ownerDocument.createElementNS(WML_NS, refTag);
+        refElement.setAttribute('w:type', 'default');
+        refElement.setAttribute('r:id', newRId);
+        sectPr.insertBefore(refElement, sectPr.firstChild);
+
+        var newDocXml = new XMLSerializer().serializeToString(docXml);
+        zip.file('word/document.xml', newDocXml);
+
+        callback(true, '已在' + (position === 'header' ? '页眉' : '页脚') + '中新建页码');
+    }).catch(function(err) {
+        callback(false, '创建页码失败: ' + (err && err.message || err));
+    });
+}
+
+// ---- XML 转义 ----
+function escXml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ---- 辅助：查找所有 w:pgSz 元素 ---- */
+function findAllPgSz(xmlDoc) {
+    var results = [];
+    // 方法1: 命名空间查找
+    var nsResults = xmlDoc.getElementsByTagNameNS(WML_NS, 'pgSz');
+    for (var i = 0; i < nsResults.length; i++) { results.push(nsResults[i]); }
+    // 方法2: 无命名空间查找（兜底）
+    if (results.length === 0) {
+        var noNs = xmlDoc.getElementsByTagName('w:pgSz');
+        for (var j = 0; j < noNs.length; j++) { results.push(noNs[j]); }
+    }
+    // 方法3: 也用 getElementsByTagName('pgSz') 兜底
+    if (results.length === 0) {
+        var bare = xmlDoc.getElementsByTagName('pgSz');
+        for (var k = 0; k < bare.length; k++) { results.push(bare[k]); }
+    }
+    return results;
+}
+
+/* ================================================================
+   渲染所有功能模块
+   ================================================================ */
+function renderModules() {
+    var container = document.getElementById('moduleList');
+    container.innerHTML = '';
+
+    for (var i = 0; i < MODULES.length; i++) {
+        var mod = MODULES[i];
+        var card = document.createElement('div');
+        card.className = 'module-card disabled';
+        card.setAttribute('data-module-id', mod.id);
+
+        var settings = {};
+        if (mod.defaultSettings) {
+            for (var k in mod.defaultSettings) { settings[k] = mod.defaultSettings[k]; }
+        }
+        card._settings = settings;
+
+        card.innerHTML = ''
+            + '<div class="module-header">'
+            + '  <input type="checkbox" id="mod_check_' + mod.id + '">'
+            + '  <span class="module-name">' + escHtml(mod.name) + '</span>'
+            + '  <span class="module-desc">' + escHtml(mod.desc) + '</span>'
+            + '  <span class="module-arrow">▶</span>'
+            + '</div>'
+            + '<div class="module-settings" id="mod_settings_' + mod.id + '"></div>';
+
+        container.appendChild(card);
+
+        // 复选框事件
+        var checkbox = card.querySelector('input[type="checkbox"]');
+        checkbox.onchange = (function(c, chk, m, s) {
+            return function() { toggleModule(c, chk, m, s); };
+        })(card, checkbox, mod, settings);
+    }
+
+    updateProcessButton();
+}
+
+function toggleModule(card, checkbox, mod, settings) {
+    if (checkbox.checked) {
+        card.className = 'module-card enabled';
+        var settingsContainer = card.querySelector('.module-settings');
+        mod.renderSettings(settingsContainer, settings);
+    } else {
+        card.className = 'module-card disabled';
+    }
+    updateProcessButton();
+}
+
+function updateProcessButton() {
+    var processBtn = document.getElementById('processBtn');
+    var hasFiles = Object.keys(batchFiles).length > 0;
+    var hasModule = getEnabledModules().length > 0;
+    processBtn.disabled = !(hasFiles && hasModule);
+    if (hasFiles && hasModule) {
+        document.getElementById('statusText').textContent = '已就绪，点击按钮开始处理';
+    }
+}
+
+function getEnabledModules() {
+    var cards = document.querySelectorAll('.module-card.enabled');
+    var result = [];
+    for (var i = 0; i < cards.length; i++) {
+        var modId = cards[i].getAttribute('data-module-id');
+        for (var j = 0; j < MODULES.length; j++) {
+            if (MODULES[j].id === modId) {
+                var mod = MODULES[j];
+                var settingsContainer = cards[i].querySelector('.module-settings');
+                var settings = mod.getSettings(settingsContainer);
+                result.push({ module: mod, settings: settings });
+                break;
+            }
+        }
+    }
+    return result;
+}
+
+/* ================================================================
+   文件选择（使用 File System Access API —— 直接拿到可写句柄）
+   ================================================================ */
+function doSelectFiles() {
+    // 优先使用 showOpenFilePicker：一次性拿到可读可写的文件句柄
+    if (window.showOpenFilePicker) {
+        window.showOpenFilePicker({
+            multiple: true,
+            types: [{
+                description: 'Word 文档',
+                accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] }
+            }]
+        }).then(function(handles) {
+            batchHandles = {};
+            batchFiles = {};
+            batchResults = [];
+            // 从每个句柄读取文件内容
+            var readPromises = [];
+            for (var i = 0; i < handles.length; i++) {
+                (function(handle) {
+                    readPromises.push(
+                        handle.getFile().then(function(file) {
+                            batchHandles[file.name] = handle;
+                            batchFiles[file.name] = file;
+                        })
+                    );
+                })(handles[i]);
+            }
+            return Promise.all(readPromises);
+        }).then(function() {
+            renderFileList();
+            resetResults();
+            updateProcessButton();
+        }).catch(function(e) {
+            if (e && e.name === 'AbortError') return; // 用户取消
+            // API 报错 → 回退到 <input type="file">
+            fallbackFileInput();
+        });
+    } else {
+        fallbackFileInput();
+    }
+}
+
+// 回退方案：用传统 <input type="file">（只读，不能写回）
+function fallbackFileInput() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.docx';
+    input.onchange = function(evt) {
+        batchHandles = {}; // 此模式下没有写入句柄
+        batchFiles = {};
+        batchResults = [];
+        var files = evt.target.files;
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            if (f.name && f.name.toLowerCase().indexOf('.docx') >= 0) {
+                batchFiles[f.name] = f;
+            }
+        }
+        renderFileList();
+        resetResults();
+        updateProcessButton();
+    };
+    input.click();
+}
+
+/* ---- 文件夹选择：递归搜索所有 .docx ---- */
+function doSelectFolder() {
+    if (window.showDirectoryPicker) {
+        window.showDirectoryPicker().then(function(dirHandle) {
+            batchHandles = {};
+            batchFiles = {};
+            batchResults = [];
+            return scanDirectory(dirHandle, '');
+        }).then(function(count) {
+            if (count === 0) {
+                document.getElementById('statusText').textContent = '所选文件夹及其子文件夹中未找到 .docx 文件';
+                renderFileList();
+                return;
+            }
+            document.getElementById('statusText').textContent = '已找到 ' + count + ' 个 .docx 文件';
+            renderFileList();
+            resetResults();
+            updateProcessButton();
+        }).catch(function(e) {
+            if (e && e.name === 'AbortError') return;
+            fallbackFolderInput();
+        });
+    } else {
+        fallbackFolderInput();
+    }
+}
+
+/* 递归扫描目录，收集所有 .docx 文件 */
+function scanDirectory(dirHandle, path) {
+    var allEntries = [];
+
+    function collectEntries(iter) {
+        return iter.next().then(function(result) {
+            if (result.done) return allEntries;
+            allEntries.push(result.value);
+            return collectEntries(iter);
+        });
+    }
+
+    return collectEntries(dirHandle.entries()).then(function() {
+        var promises = [];
+        for (var i = 0; i < allEntries.length; i++) {
+            (function(entry) {
+                var name = entry[0];
+                var handle = entry[1];
+                var fullPath = path ? path + '/' + name : name;
+
+                if (handle.kind === 'file') {
+                    if (name.toLowerCase().endsWith('.docx')) {
+                        batchHandles[fullPath] = handle;
+                        promises.push(handle.getFile().then(function(file) {
+                            batchFiles[fullPath] = file;
+                        }));
+                    }
+                } else if (handle.kind === 'directory') {
+                    promises.push(scanDirectory(handle, fullPath));
+                }
+            })(allEntries[i]);
+        }
+        return Promise.all(promises).then(function() {
+            return Object.keys(batchFiles).length;
+        });
+    });
+}
+
+/* 文件夹选择的回退方案：webkitdirectory */
+function fallbackFolderInput() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.webkitdirectory = true;
+    input.directory = true;  // 兼容 Firefox
+    input.onchange = function(evt) {
+        batchHandles = {}; // 无写入句柄
+        batchFiles = {};
+        batchResults = [];
+        var files = evt.target.files;
+        var count = 0;
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            if (f.name && f.name.toLowerCase().indexOf('.docx') >= 0) {
+                // webkitRelativePath 包含子目录路径，如 "subfolder/report.docx"
+                var key = f.webkitRelativePath || f.name;
+                batchFiles[key] = f;
+                count++;
+            }
+        }
+        renderFileList();
+        resetResults();
+        updateProcessButton();
+        document.getElementById('statusText').textContent = '已找到 ' + count + ' 个 .docx 文件（只读模式，覆盖保存将逐个确认）';
+    };
+    input.click();
+}
+
+function doClearFiles() {
+    batchHandles = {};
+    batchFiles = {};
+    batchResults = [];
+    renderFileList();
+    resetResults();
+    updateProcessButton();
+}
+
+function renderFileList() {
+    var names = Object.keys(batchFiles);
+    var el = document.getElementById('fileList');
+    var clearBtn = document.getElementById('clearFilesBtn');
+    if (names.length === 0) {
+        el.innerHTML = '未选择文件';
+        clearBtn.style.display = 'none';
+        return;
+    }
+    clearBtn.style.display = 'inline-block';
+    var fromFolder = false;
+    for (var i = 0; i < names.length; i++) {
+        if (names[i].indexOf('/') >= 0) { fromFolder = true; break; }
+    }
+    var html = '已选择 <b>' + names.length + '</b> 个文件' + (fromFolder ? '（含子文件夹）' : '') + ':';
+    for (var j = 0; j < names.length; j++) {
+        html += '<div class="file-item">• ' + escHtml(names[j]) + '</div>';
+    }
+    el.innerHTML = html;
+}
+
+function resetResults() {
+    document.getElementById('resultCard').style.display = 'none';
+    document.getElementById('resultArea').innerHTML = '';
+    document.getElementById('downloadBtn').style.display = 'none';
+    document.getElementById('downloadBtn').disabled = true;
+    document.getElementById('progressBar').style.display = 'none';
+    document.getElementById('progressFill').style.width = '0%';
+}
+
+/* ================================================================
+   批量处理主流程
+   ================================================================ */
+function doProcess() {
+    var modulesToRun = getEnabledModules();
+    var fileNames = Object.keys(batchFiles);
+
+    if (fileNames.length === 0) { alert('请先选择 .docx 文件'); return; }
+    if (modulesToRun.length === 0) { alert('请至少勾选一个处理功能'); return; }
+
+    batchResults = [];
+    resetResults();
+    document.getElementById('resultCard').style.display = 'block';
+    document.getElementById('resultArea').innerHTML = '<span style="color:#888;">正在处理...</span>';
+    document.getElementById('progressBar').style.display = 'block';
+    document.getElementById('progressFill').style.width = '0%';
+    document.getElementById('downloadBtn').style.display = 'none';
+    document.getElementById('downloadBtn').disabled = true;
+    document.getElementById('processBtn').disabled = true;
+
+    var totalFiles = fileNames.length;
+    var completedCount = 0;
+    var totalModChanges = 0;
+
+    function processFile(index) {
+        if (index >= totalFiles) {
+            // 全部完成
+            document.getElementById('progressFill').style.width = '100%';
+            document.getElementById('processBtn').disabled = false;
+            updateProcessButton();
+
+            var hasBlob = false;
+            for (var k = 0; k < batchResults.length; k++) {
+                if (batchResults[k].blob) hasBlob = true;
+            }
+            if (hasBlob) {
+                document.getElementById('downloadBtn').style.display = 'inline-block';
+                document.getElementById('downloadBtn').disabled = false;
+            }
+            document.getElementById('statusText').textContent = '处理完成！共 ' + totalFiles + ' 个文件';
+            renderResults();
+            return;
+        }
+
+        var name = fileNames[index];
+        document.getElementById('statusText').textContent = '处理中 ' + (index+1) + '/' + totalFiles + ': ' + name;
+        document.getElementById('progressFill').style.width = Math.round((index / totalFiles) * 100) + '%';
+
+        readFileAsArrayBuffer(batchFiles[name], function(err, data) {
+            if (err) {
+                batchResults.push({ name: name, ok: false, msg: '文件读取失败', blob: null });
+                completedCount++;
+                processFile(index + 1);
+                return;
+            }
+
+            // 加载 ZIP
+            JSZip.loadAsync(data).then(function(zip) {
+                // 串行执行所有选中模块
+                runModulesOnZip(name, zip, modulesToRun, 0, [], function(finalZip, moduleMsgs) {
+                    var changed = false;
+                    for (var mm = 0; mm < moduleMsgs.length; mm++) {
+                        if (moduleMsgs[mm].changed) changed = true;
+                    }
+
+                    if (changed) {
+                        return finalZip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }).then(function(blob) {
+                            batchResults.push({ name: name, ok: true, msg: moduleMsgs, blob: blob });
+                            completedCount++;
+                            renderResults();
+                            processFile(index + 1);
+                        });
+                    } else {
+                        batchResults.push({ name: name, ok: true, msg: moduleMsgs, blob: null });
+                        completedCount++;
+                        renderResults();
+                        processFile(index + 1);
+                    }
+                });
+            }).catch(function(e) {
+                batchResults.push({ name: name, ok: false, msg: [{ moduleName: '', msg: '加载失败: ' + (e && e.message || e) }], blob: null });
+                completedCount++;
+                renderResults();
+                processFile(index + 1);
+            });
+        });
+    }
+
+    processFile(0);
+}
+
+/* 对一个 ZIP 串行执行多个模块 */
+function runModulesOnZip(fileName, zip, modulesToRun, idx, msgs, callback) {
+    if (idx >= modulesToRun.length) {
+        callback(zip, msgs);
+        return;
+    }
+
+    var entry = modulesToRun[idx];
+    var mod = entry.module;
+    var settings = entry.settings;
+
+    // 克隆 zip 进行模块处理（模块内部修改）
+    // 但 JSZip 不支持直接克隆。我们使用当前 zip 让模块修改。
+    // 注意：每个模块按顺序修改同一个 zip。
+    mod.process(zip, settings, function(success, msg) {
+        msgs.push({
+            moduleName: mod.name,
+            msg: msg,
+            changed: success && msg.indexOf('无需修改') < 0
+        });
+        runModulesOnZip(fileName, zip, modulesToRun, idx + 1, msgs, callback);
+    });
+}
+
+function renderResults() {
+    var el = document.getElementById('resultArea');
+    var html = '';
+    for (var i = 0; i < batchResults.length; i++) {
+        var r = batchResults[i];
+        var statusCls = r.blob ? 'result-ok' : (r.ok ? 'result-nochange' : 'result-err');
+        var icon = r.blob ? '✔' : (r.ok ? '—' : '✘');
+
+        html += '<div>';
+        html += '<span class="' + statusCls + '">' + icon + ' ' + escHtml(r.name) + '</span>';
+
+        if (r.msg && r.msg.length > 0 && typeof r.msg === 'object') {
+            // 多个模块消息
+            for (var j = 0; j < r.msg.length; j++) {
+                var m = r.msg[j];
+                var cls = m.changed ? 'result-ok' : 'result-nochange';
+                html += '<div style="margin-left:14px;font-size:10px;" class="' + cls + '">'
+                    + escHtml('[' + m.moduleName + '] ' + m.msg)
+                    + '</div>';
+            }
+        } else if (r.msg) {
+            html += '<div style="margin-left:14px;font-size:10px;" class="' + statusCls + '">'
+                + escHtml(typeof r.msg === 'string' ? r.msg : JSON.stringify(r.msg))
+                + '</div>';
+        }
+        html += '</div>';
+    }
+    if (html === '') html = '<span style="color:#888;">等待处理...</span>';
+    el.innerHTML = html;
+}
+
+/* ================================================================
+   输出文件名处理
+   ================================================================ */
+function getOutputMode() {
+    var checked = document.querySelector('input[name="outputMode"]:checked');
+    return checked ? checked.value : 'overwrite';
+}
+
+function getOutputFilename(originalName) {
+    var mode = getOutputMode();
+    if (mode === 'overwrite') return originalName;
+
+    // 另存为新文件：在扩展名前加后缀
+    var suffix = document.getElementById('suffixInput').value.trim() || '_已处理';
+    var lastDot = originalName.lastIndexOf('.');
+    if (lastDot >= 0) {
+        return originalName.substring(0, lastDot) + suffix + originalName.substring(lastDot);
+    }
+    return originalName + suffix;
+}
+
+/* ================================================================
+   保存结果（优先用 File System Access API 直接写盘）
+   ================================================================ */
+function doDownload() {
+    var changedFiles = [];
+    for (var i = 0; i < batchResults.length; i++) {
+        if (batchResults[i].blob) changedFiles.push(batchResults[i]);
+    }
+    if (changedFiles.length === 0) { alert('没有文件被修改'); return; }
+
+    var mode = getOutputMode();
+
+    if (mode === 'overwrite') {
+        // ★ 覆盖原文件：直接写回 showOpenFilePicker 获得的句柄，不弹任何对话框
+        saveAsOverwrite(changedFiles);
+    } else {
+        // 另存为新文件：弹出目录选择器
+        saveAsNew(changedFiles);
+    }
+}
+
+/* ================================================================
+   自定义确认对话框（替代浏览器 confirm，避免 Office iframe 限制）
+   ================================================================ */
+function showConfirmDialog(message, onOk, onCancel) {
+    var overlay = document.getElementById('confirmOverlay');
+    var body = document.getElementById('confirmBody');
+    var okBtn = document.getElementById('confirmOk');
+    var cancelBtn = document.getElementById('confirmCancel');
+
+    if (!overlay || !body) {
+        // 回退到原生 confirm
+        if (confirm(message)) { onOk(); } else { onCancel(); }
+        return;
+    }
+
+    body.textContent = message;
+    overlay.style.display = 'flex';
+
+    // 清除旧事件，绑定新事件
+    okBtn.onclick = function() {
+        overlay.style.display = 'none';
+        if (onOk) onOk();
+    };
+    cancelBtn.onclick = function() {
+        overlay.style.display = 'none';
+        if (onCancel) onCancel();
+    };
+
+    // 点击遮罩层也可以取消（但不触发，防止误操作）
+    // overlay.onclick = function(e) { if (e.target === overlay) { cancelBtn.onclick(); } };
+}
+
+// ---- 覆盖原文件：使用自定义对话框一次性确认 ----
+function saveAsOverwrite(changedFiles) {
+    var hasHandles = false;
+    for (var i = 0; i < changedFiles.length; i++) {
+        if (batchHandles[changedFiles[i].name]) { hasHandles = true; break; }
+    }
+
+    // 构建文件清单
+    var fileListText = '';
+    for (var j = 0; j < changedFiles.length; j++) {
+        fileListText += '• ' + changedFiles[j].name + '\n';
+    }
+
+    // 使用自定义确认对话框替代 confirm()
+    showConfirmDialog(
+        '即将覆盖以下 ' + changedFiles.length + ' 个文件：\n\n' + fileListText + '\n此操作不可撤销，是否确认全部覆盖？',
+        function() {
+            // 用户点击"确认覆盖"
+            if (!hasHandles) {
+                saveWithPickerOneByOne(changedFiles, function(remaining) {
+                    if (remaining.length > 0) fallbackDownload(remaining);
+                });
+                return;
+            }
+
+            var total = changedFiles.length;
+            var done = 0;
+            var statusEl = document.getElementById('statusText');
+            statusEl.textContent = '正在写入文件... 0/' + total;
+
+            function writeNext(index) {
+                if (index >= changedFiles.length) {
+                    statusEl.textContent = '已完成覆盖保存 ' + total + ' 个文件';
+                    return;
+                }
+                var item = changedFiles[index];
+                var handle = batchHandles[item.name];
+                if (!handle) {
+                    statusEl.textContent = '跳过 ' + item.name + '（无写入权限）';
+                    done++;
+                    writeNext(index + 1);
+                    return;
+                }
+                var writable = null;
+                handle.createWritable().then(function(w) {
+                    writable = w;
+                    return w.write(item.blob);
+                }).then(function() {
+                    return writable.close();
+                }).then(function() {
+                    done++;
+                    statusEl.textContent = '已覆盖保存 ' + done + '/' + total + ': ' + item.name;
+                    writeNext(index + 1);
+                }).catch(function(e) {
+                    statusEl.textContent = '写入失败: ' + item.name + ' - ' + (e && e.message || e);
+                    writeNext(index + 1);
+                });
+            }
+            writeNext(0);
+        },
+        function() {
+            // 用户点击"取消"
+            document.getElementById('statusText').textContent = '已取消保存';
+        }
+    );
+}
+
+// ---- 另存为新文件：弹出目录选择器 ----
+function saveAsNew(changedFiles) {
+    var outFiles = [];
+    for (var i = 0; i < changedFiles.length; i++) {
+        var baseName = changedFiles[i].name;
+        // 如果是路径格式（如 "子文件夹/报告.docx"），只取文件名部分
+        var lastSlash = baseName.lastIndexOf('/');
+        if (lastSlash >= 0) baseName = baseName.substring(lastSlash + 1);
+        outFiles.push({
+            name: getOutputFilename(baseName),
+            blob: changedFiles[i].blob
+        });
+    }
+
+    if (window.showDirectoryPicker) {
+        window.showDirectoryPicker().then(function(dirHandle) {
+            writeFilesToDir(dirHandle, outFiles, 0, function() {
+                document.getElementById('statusText').textContent = '已保存 ' + outFiles.length + ' 个新文件到选定目录';
+            });
+        }).catch(function(e) {
+            if (e && e.name === 'AbortError') return;
+            fallbackDownload(outFiles);
+        });
+    } else {
+        fallbackDownload(outFiles);
+    }
+}
+
+// ---- 回退：逐个 showSaveFilePicker ----
+function saveWithPickerOneByOne(fileList, onAllDone) {
+    var remaining = fileList.slice();
+    if (!window.showSaveFilePicker) { onAllDone(remaining); return; }
+
+    function pickNext() {
+        if (remaining.length === 0) { onAllDone([]); return; }
+        var item = remaining.shift();
+        var writable = null;
+        window.showSaveFilePicker({ suggestedName: item.name }).then(function(handle) {
+            return handle.createWritable();
+        }).then(function(w) {
+            writable = w;
+            return w.write(item.blob);
+        }).then(function() {
+            return writable.close();
+        }).then(function() {
+            document.getElementById('statusText').textContent = '已保存: ' + item.name;
+            pickNext();
+        }).catch(function(e) {
+            pickNext();
+        });
+    }
+    pickNext();
+}
+
+// ---- 多文件写入目录 ----
+function writeFilesToDir(dirHandle, fileList, index, finalCallback) {
+    if (index >= fileList.length) {
+        if (finalCallback) finalCallback();
+        return;
+    }
+    var item = fileList[index];
+    var fileWritable = null;
+    dirHandle.getFileHandle(item.name, { create: true }).then(function(fileHandle) {
+        return fileHandle.createWritable();
+    }).then(function(writable) {
+        fileWritable = writable;
+        return writable.write(item.blob);
+    }).then(function() {
+        return fileWritable.close();
+    }).then(function() {
+        writeFilesToDir(dirHandle, fileList, index + 1, finalCallback);
+    }).catch(function(e) {
+        writeFilesToDir(dirHandle, fileList, index + 1, finalCallback);
+    });
+}
+
+// ---- 回退方案：浏览器下载 ----
+function fallbackDownload(fileList) {
+    var mode = getOutputMode();
+    document.getElementById('statusText').textContent = '已触发下载（' + (mode === 'overwrite' ? '覆盖原文件' : '另存为新文件') + '）';
+
+    if (fileList.length === 1) {
+        downloadBlob(fileList[0].blob, fileList[0].name);
+        return;
+    }
+    var zip = new JSZip();
+    for (var i = 0; i < fileList.length; i++) {
+        zip.file(fileList[i].name, fileList[i].blob);
+    }
+    zip.generateAsync({ type: 'blob' }).then(function(zipBlob) {
+        downloadBlob(zipBlob, '批量处理结果.zip');
+    });
+}
+
+function downloadBlob(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+}
+
+/* ================================================================
+   工具函数
+   ================================================================ */
+function readFileAsArrayBuffer(file, callback) {
+    var reader = new FileReader();
+    reader.onload = function(e) { callback(null, e.target.result); };
+    reader.onerror = function(e) { callback(e, null); };
+    reader.readAsArrayBuffer(file);
+}
+
+function escHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/* ================================================================
+   初始化
+   ================================================================ */
+Office.onReady(function(info) {
+    // 绑定按钮事件
+    document.getElementById('selectBtn').onclick = doSelectFiles;
+    document.getElementById('selectFolderBtn').onclick = doSelectFolder;
+    document.getElementById('clearFilesBtn').onclick = doClearFiles;
+    document.getElementById('processBtn').onclick = doProcess;
+    document.getElementById('downloadBtn').onclick = doDownload;
+
+    // 输出方式：单选按钮切换
+    var outOverwrite = document.getElementById('outOverwrite');
+    var outSuffix = document.getElementById('outSuffix');
+    var suffixRow = document.getElementById('suffixRow');
+    var outRadios = document.querySelectorAll('input[name="outputMode"]');
+    for (var ri = 0; ri < outRadios.length; ri++) {
+        outRadios[ri].onchange = function() {
+            outOverwrite.className = this.value === 'overwrite' ? 'active' : '';
+            outSuffix.className = this.value === 'suffix' ? 'active' : '';
+            suffixRow.style.display = this.value === 'suffix' ? 'flex' : 'none';
+        };
+    }
+    // 处理 label 点击（确保 radio 也触发）
+    outOverwrite.onclick = function() {
+        outOverwrite.querySelector('input').checked = true;
+        outOverwrite.className = 'active';
+        outSuffix.className = '';
+        suffixRow.style.display = 'none';
+    };
+    outSuffix.onclick = function() {
+        outSuffix.querySelector('input').checked = true;
+        outSuffix.className = 'active';
+        outOverwrite.className = '';
+        suffixRow.style.display = 'flex';
+    };
+
+    // 渲染模块列表
+    renderModules();
+
+    // 显示 Word 就绪状态
+    var statusEl = document.getElementById('statusText');
+    if (info.host === Office.HostType.Word) {
+        statusEl.textContent = '就绪 — 请先选择文件并勾选处理功能';
+    } else {
+        statusEl.textContent = '请在 Word 中加载此加载项';
+    }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>段落复制</title>
+<style>
+body{font-family:"Microsoft YaHei",sans-serif;padding:12px;font-size:14px;color:#333;}
+h3{margin:0 0 10px;font-size:16px;color:#1a73e8;}
+.section{margin-bottom:12px;padding:10px;background:#f5f7fa;border-radius:6px;border:1px solid #e0e5ec;}
+.section label{display:block;margin-bottom:4px;font-weight:bold;font-size:13px;}
+.section input[type=number]{width:80px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:14px;}
+.section input[type=text]{width:200px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:14px;}
+.btn-row{margin:12px 0;display:flex;gap:8px;flex-wrap:wrap;}
+.btn-row button{padding:6px 14px;font-size:13px;border-radius:4px;border:none;cursor:pointer;font-weight:bold;}
+.btn-copy{background:#1a73e8;color:#fff;}
+.btn-preview{background:#34a853;color:#fff;}
+.btn-copy[disabled],.btn-preview[disabled]{background:#ccc;cursor:not-allowed;}
+#status{color:#666;font-size:12px;margin-top:8px;min-height:18px;}
+#preview{max-height:200px;overflow-y:auto;background:#fff;border:1px solid #ddd;padding:8px;font-size:12px;color:#555;white-space:pre-wrap;margin-top:8px;display:none;border-radius:4px;}
+#preview .info{color:#1a73e8;font-weight:bold;}
+#preview .sep{color:#ccc;margin:2px 0;border-bottom:1px dashed #eee;}
+hr{border:none;border-top:1px solid #e0e5ec;margin:10px 0;}
+.radio-row{display:flex;gap:12px;margin-top:4px;}
+.radio-row label{font-weight:normal;}
+</style>
+</head>
+<body>
+<h3>段落复制工具</h3>
+
+<div class="section">
+  <label>最小字符数（跳过更短的段落）：</label>
+  <input type="number" id="minChars" value="50" min="0">
+</div>
+
+<div class="section" id="selMode" style="display:none;">
+  <span style="color:#1a73e8;font-weight:bold;">当前有选中文本 — 仅处理选中区域的段落</span>
+</div>
+
+<div class="section" id="pageSection">
+  <label>页码范围（留空=全部，如: 1,3-5）：</label>
+  <input type="text" id="pageRange" placeholder="例如: 1,3-5">
+  <div style="font-size:11px;color:#888;margin-top:4px;">按 Word 物理页序号过滤，跨页段落会被包含</div>
+</div>
+
+<div class="section" id="rangeSection">
+  <label>段落范围（留空=全部，如: 1,3-5）：</label>
+  <input type="text" id="paraRange" placeholder="例如: 1,3-5">
+</div>
+
+<hr>
+
+<div class="btn-row">
+  <button class="btn-copy" id="btnCopy" onclick="doCopy()">复制到剪贴板</button>
+  <button class="btn-preview" id="btnPreview" onclick="doPreview()">预览段落</button>
+</div>
+
+<div id="status"></div>
+<div id="preview"></div>
+
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+<script>
+var gIsSelection = false;
+
+Office.onReady(function(info){
+  if(info.host !== Office.HostType.Word){
+    document.getElementById('status').innerText = '请在Word中使用此加载项';
+    return;
+  }
+  Word.run(function(context){
+    var sel = context.document.getSelection();
+    context.load(sel, 'text');
+    return context.sync().then(function(){
+      var t = sel.text.trim();
+      if(t.length > 0){
+        gIsSelection = true;
+        document.getElementById('selMode').style.display = 'block';
+        document.getElementById('rangeSection').style.display = 'none';
+        document.getElementById('pageSection').style.display = 'none';
+      }
+    });
+  }).catch(function(){});
+});
+
+function doCopy(){
+  collectAndShow(true);
+}
+
+function doPreview(){
+  collectAndShow(false);
+}
+
+function collectAndShow(isCopy){
+  var statusEl = document.getElementById('status');
+  var previewEl = document.getElementById('preview');
+  var minChars = parseInt(document.getElementById('minChars').value) || 0;
+  var pageRangeStr = document.getElementById('pageRange').value.trim();
+  var paraRangeStr = document.getElementById('paraRange').value.trim();
+  var usePageFilter = !gIsSelection && pageRangeStr !== '';
+  var useParaRange = !gIsSelection && paraRangeStr !== '';
+  statusEl.innerText = usePageFilter ? '正在读取段落及页码信息...' : '正在读取段落...';
+  previewEl.style.display = 'none';
+
+  Word.run(function(context){
+    var body = context.document.body;
+    var paras = body.paragraphs;
+    context.load(paras, 'text');
+    return context.sync().then(function(){
+      // 保留段落对象和文本，供后续页码过滤使用
+      var candidates = [];
+      for(var i = 0; i < paras.items.length; i++){
+        var t = paras.items[i].text.trim();
+        if(t.length >= minChars){
+          candidates.push({text: t, paragraph: paras.items[i]});
+        }
+      }
+
+      // 页码过滤（仅桌面版 Word 支持 Word.Page API）
+      if(usePageFilter){
+        var pageNums = parsePageRange(pageRangeStr);
+        if(pageNums.length === 0){
+          statusEl.innerHTML = '<span style="color:#c00;">页码范围格式错误</span>';
+          return;
+        }
+        var pageChecks = [];
+        for(var i = 0; i < candidates.length; i++){
+          try {
+            var pages = candidates[i].paragraph.getRange().pages;
+            pageChecks.push({candidate: candidates[i], pages: pages});
+            context.load(pages, 'index');
+          } catch(e){
+            statusEl.innerHTML = '<span style="color:#c00;">当前 Word 版本不支持页码过滤（需 Word 桌面版）</span>';
+            return;
+          }
+        }
+        return context.sync().then(function(){
+          var filteredByPage = [];
+          for(var i = 0; i < pageChecks.length; i++){
+            var found = false;
+            var items = pageChecks[i].pages.items;
+            for(var j = 0; j < items.length; j++){
+              if(pageNums.indexOf(items[j].index) >= 0){
+                found = true;
+                break;
+              }
+            }
+            if(found) filteredByPage.push(pageChecks[i].candidate);
+          }
+          finishCollect(filteredByPage, useParaRange ? paraRangeStr : '', isCopy, statusEl, previewEl);
+        });
+      } else {
+        finishCollect(candidates, useParaRange ? paraRangeStr : '', isCopy, statusEl, previewEl);
+      }
+    });
+  }).catch(function(err){
+    statusEl.innerHTML = '<span style="color:#c00;">错误：' + escapeHtml(err.message || err) + '</span>';
+  });
+}
+
+function finishCollect(candidates, paraRangeStr, isCopy, statusEl, previewEl){
+  var filtered = candidates;
+  if(paraRangeStr !== ''){
+    var seqs = getSeq(paraRangeStr, candidates.length);
+    filtered = [];
+    for(var k = 0; k < seqs.length; k++){
+      if(seqs[k] >= 0 && seqs[k] < candidates.length){
+        filtered.push(candidates[seqs[k]]);
+      }
+    }
+  }
+
+  if(filtered.length === 0){
+    statusEl.innerHTML = '<span style="color:#c00;">未找到符合条件的段落</span>';
+    previewEl.style.display = 'none';
+    return;
+  }
+
+  var resultArr = [];
+  for(var i = 0; i < filtered.length; i++){
+    resultArr.push(filtered[i].text);
+  }
+  var result = resultArr.join('\r\n');
+
+  if(!isCopy){
+    // 预览
+    var html = '<span class="info">共 ' + filtered.length + ' 段，预览前20段：</span>\n';
+    var show = Math.min(filtered.length, 20);
+    for(var j = 0; j < show; j++){
+      var txt = filtered[j].text;
+      if(txt.length > 80) txt = txt.substring(0, 80) + '...';
+      html += (j+1) + '. ' + escapeHtml(txt) + '\n';
+    }
+    if(filtered.length > 20) html += '\n...（仅显示前20段）';
+    previewEl.innerHTML = html;
+    previewEl.style.display = 'block';
+    statusEl.innerHTML = '<span style="color:#34a853;">预览：共 ' + filtered.length + ' 段</span>';
+  } else {
+    // 复制
+    copyToClipboard(result);
+    statusEl.innerHTML = '<span style="color:#1a73e8;">已复制到剪贴板！共 ' + filtered.length + ' 段，' + result.length + ' 字符</span>';
+  }
+}
+
+function getSeq(input, maxLen){
+  var nums = [];
+  var parts = input.replace(/p/gi,'').split(',');
+  for(var i = 0; i < parts.length; i++){
+    var p = parts[i].trim();
+    if(p === '') continue;
+    if(p.indexOf('-') > -1){
+      var range = p.split('-');
+      var s = parseInt(range[0]) - 1;
+      var e = parseInt(range[1]) - 1;
+      for(var n = s; n <= e && n < maxLen; n++){
+        if(n >= 0) nums.push(n);
+      }
+    } else {
+      var n = parseInt(p) - 1;
+      if(n >= 0 && n < maxLen) nums.push(n);
+    }
+  }
+  return nums;
+}
+
+function parsePageRange(input){
+  var nums = [];
+  var seen = {};
+  var parts = input.replace(/p/gi,'').split(',');
+  for(var i = 0; i < parts.length; i++){
+    var p = parts[i].trim();
+    if(p === '') continue;
+    if(p.indexOf('-') > -1){
+      var range = p.split('-');
+      var s = parseInt(range[0]);
+      var e = parseInt(range[1]);
+      for(var n = s; n <= e; n++){
+        if(n >= 1 && !seen[n]){
+          seen[n] = true;
+          nums.push(n);
+        }
+      }
+    } else {
+      var n = parseInt(p);
+      if(n >= 1 && !seen[n]){
+        seen[n] = true;
+        nums.push(n);
+      }
+    }
+  }
+  return nums;
+}
+
+function copyToClipboard(text){
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  ta.style.top = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+}
+
+function escapeHtml(str){
+  var div = document.createElement('div');
+  div.appendChild(document.createTextNode(str));
+  return div.innerHTML;
+}
+
+// Enter 快捷键复制
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Enter' && e.target === document.body){
+    e.preventDefault();
+    doCopy();
+  }
+});
+</script>
+</body>
+</html>

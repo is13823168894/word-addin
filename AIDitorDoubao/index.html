@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>AI Ditor</title>
+    <style>
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; font-family: 'Microsoft YaHei', sans-serif; }
+        body { background: #f5f6f8; overflow: hidden; display: flex; flex-direction: column; }
+
+        #frameWrap {
+            position: relative;
+            width: 100%;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+        }
+        #ybFrame {
+            border: none;
+            width: 100%;
+            height: 100%;
+            background: #fff;
+        }
+
+        #sidePanel {
+            position: absolute;
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            z-index: 100;
+            user-select: none;
+        }
+        #sidePanel button {
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            border: 1px solid rgba(0,0,0,0.15);
+            border-radius: 4px;
+            background: rgba(255,255,255,0.95);
+            color: #444;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+            transition: background 0.12s, color 0.12s, border-color 0.12s;
+        }
+        #sidePanel button:hover {
+            background: #2b579a;
+            color: #fff;
+            border-color: #2b579a;
+        }
+        #sidePanel .reset-btn { font-size: 10px; }
+
+        /* 底部操作栏 */
+        #actionBar {
+            flex: 0 0 auto;
+            padding: 6px 8px;
+            background: #f5f6f8;
+            border-top: 1px solid #e0e0e0;
+        }
+        .section {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 6px 10px;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        .section-label { font-weight: bold; font-size: 12px; color: #555; }
+        .status-text { font-size: 11px; color: #999; }
+        .status-text.ready { color: #107c10; font-weight: bold; }
+
+        .btn-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .ab-btn {
+            flex: 0 0 auto;
+            padding: 4px 10px;
+            border: 1px solid #d0d0d0;
+            border-radius: 12px;
+            background: #fff;
+            color: #333;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.12s;
+        }
+        .ab-btn:hover {
+            background: #2b579a;
+            color: #fff;
+            border-color: #2b579a;
+        }
+        .ab-btn:active, .ab-btn.active {
+            background: #1a3d6b;
+            color: #fff;
+            border-color: #1a3d6b;
+            transform: scale(0.96);
+        }
+        .ab-btn.primary {
+            background: #2b579a;
+            color: #fff;
+            border-color: #2b579a;
+        }
+        .ab-btn.primary:hover { background: #1a3d6b; }
+
+        /* toast */
+        #toast {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 300;
+            background: rgba(0,0,0,0.82);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            white-space: nowrap;
+            text-align: center;
+            max-width: 280px;
+        }
+        #toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div id="frameWrap">
+        <iframe id="ybFrame" src="https://www.doubao.com/"
+            referrerpolicy="no-referrer-when-downgrade"
+            allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+
+        <div id="sidePanel">
+            <button id="zoomOutBtn" title="缩小">A-</button>
+            <button id="zoomResetBtn" class="reset-btn" title="重置">100%</button>
+            <button id="zoomInBtn" title="放大">A+</button>
+        </div>
+
+        <div id="toast"></div>
+    </div>
+
+    <!-- 底部操作栏 -->
+    <div id="actionBar">
+        <div class="section">
+            <div class="section-header">
+                <span class="section-label">AI 操作</span>
+                <span class="status-text" id="statusText">在 Word 中选中文字后点击按钮</span>
+            </div>
+            <div class="btn-row" id="btnRow">
+                <button class="ab-btn" data-act="summarize">总结</button>
+                <button class="ab-btn" data-act="abstract">摘要</button>
+                <button class="ab-btn" data-act="proofread">校对</button>
+                <button class="ab-btn" data-act="polish">润色</button>
+                <button class="ab-btn" data-act="translate">翻译</button>
+                <button class="ab-btn" data-act="rewrite">改写</button>
+                <button class="ab-btn" data-act="expand">扩写</button>
+                <button class="ab-btn primary" data-act="send">发送到豆包</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    (function () {
+        var frame = document.getElementById('ybFrame');
+        var toast = document.getElementById('toast');
+        var statusText = document.getElementById('statusText');
+        var btnRow = document.getElementById('btnRow');
+
+        /* === toast === */
+        function showToast(msg, dur) {
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(function () { toast.classList.remove('show'); }, dur || 2500);
+        }
+
+        /* === 状态 === */
+        function setStatus(text, ready) {
+            statusText.textContent = text;
+            statusText.classList.toggle('ready', !!ready);
+        }
+
+        /* === 捕获 Word 选中文字（按钮点击时调用，同 compare 方式） === */
+        function captureSelection(callback) {
+            try {
+                Word.run(function (context) {
+                    var sel = context.document.getSelection();
+                    sel.load('text');
+                    return context.sync().then(function () {
+                        callback((sel.text || '').trim());
+                    });
+                }).catch(function (err) {
+                    console.log('Word.run failed:', err);
+                    try {
+                        Office.context.document.getSelectedDataAsync(
+                            Office.CoercionType.Text,
+                            function (result) {
+                                if (result.status === Office.AsyncResultStatus.Succeeded && result.value) {
+                                    callback(result.value.trim());
+                                } else { callback(''); }
+                            }
+                        );
+                    } catch (e) { callback(''); }
+                });
+            } catch (e) {
+                try {
+                    Office.context.document.getSelectedDataAsync(
+                        Office.CoercionType.Text,
+                        function (result) {
+                            if (result.status === Office.AsyncResultStatus.Succeeded && result.value) {
+                                callback(result.value.trim());
+                            } else { callback(''); }
+                        }
+                    );
+                } catch (e2) { callback(''); }
+            }
+        }
+
+        /* === 复制到系统剪贴板 === */
+        function copyText(text) {
+            if (!text) return Promise.reject('empty');
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            ta.style.top = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            try {
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                return Promise.resolve(true);
+            } catch (e) {
+                document.body.removeChild(ta);
+                return Promise.reject(e);
+            }
+        }
+
+        /* === 提示词模板 === */
+        var PROMPTS = {
+            summarize: function (t) { return '请用简洁的中文总结以下内容的核心要点：\n\n' + t; },
+            abstract:  function (t) { return '请为以下内容撰写一段 （字数不限，短的100-200 字，长文本可以扩展，建议是压缩比例在10%以内（看数据类型））的摘要：\n\n' + t; },
+            proofread: function (t) { return '请校对以下文本，包括但不限于修正错别字、标点符号、语法错误、逻辑错误、口语化、事实性错误等，如有问题请直接给出修改后的版本（但要在修改处作标注）：\n\n' + t; },
+            polish:    function (t) { return '请润色以下文本，使其语言更加流畅、专业、通顺，保持原意不变：\n\n' + t; },
+            translate: function (t) { return '请将以下文本翻译成英文：\n\n' + t; },
+            rewrite:   function (t) { return '请改写以下文本，换一种表达方式，保持原意：\n\n' + t; },
+            expand:    function (t) { return '请基于以下内容进行扩写，补充相关细节和论述，使其更加充实：\n\n' + t; },
+            send:      function (t) { return t; }
+        };
+
+        /* === 按钮点击：捕获 → 复制 → 引导粘贴 === */
+        btnRow.addEventListener('click', function (e) {
+            var btn = e.target.closest('.ab-btn');
+            if (!btn) return;
+            var act = btn.dataset.act;
+            var promptFn = PROMPTS[act];
+            if (!promptFn) return;
+
+            btn.classList.add('active');
+            setTimeout(function () { btn.classList.remove('active'); }, 200);
+
+            setStatus('正在捕获文字…', false);
+
+            captureSelection(function (text) {
+                if (!text) {
+                    setStatus('未选中文字，请先在 Word 中选文字', false);
+                    showToast('请先在 Word 中选中文字', 2000);
+                    return;
+                }
+
+                var finalText = promptFn(text);
+                setStatus('已捕获 ' + text.length + ' 字，正在复制…', true);
+
+                copyText(finalText).then(function () {
+                    setStatus('✓ 已复制，切换到豆包按 Ctrl+V', true);
+                    showToast('已复制！切换到豆包输入框，按 Ctrl+V 粘贴', 3500);
+                    // 聚焦到豆包 iframe，用户点击后可直接粘贴
+                    setTimeout(function () {
+                        var iframe = document.getElementById('ybFrame');
+                        if (iframe) iframe.focus();
+                    }, 200);
+                }).catch(function () {
+                    setStatus('复制失败', false);
+                    showToast('复制失败，请手动复制', 2000);
+                });
+            });
+        });
+
+        /* === 字体缩放 === */
+        var ZOOM_KEY = 'aiditor_zoom';
+        var MIN_ZOOM = 0.5, MAX_ZOOM = 2.5, STEP = 0.1;
+        var zoomLevel = parseFloat(localStorage.getItem(ZOOM_KEY)) || 1.0;
+        function applyZoom() {
+            zoomLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomLevel));
+            frame.style.zoom = zoomLevel;
+            document.getElementById('frameWrap').style.overflow = zoomLevel !== 1.0 ? 'auto' : 'hidden';
+            localStorage.setItem(ZOOM_KEY, zoomLevel.toFixed(2));
+            document.getElementById('zoomResetBtn').textContent = Math.round(zoomLevel * 100) + '%';
+        }
+        document.getElementById('zoomInBtn').onclick = function () { zoomLevel += STEP; applyZoom(); };
+        document.getElementById('zoomOutBtn').onclick = function () { zoomLevel -= STEP; applyZoom(); };
+        document.getElementById('zoomResetBtn').onclick = function () { zoomLevel = 1.0; applyZoom(); };
+        applyZoom();
+
+        /* === 初始化 === */
+        setStatus('就绪 — 在 Word 中选中文字后点击按钮', true);
+    })();
+    </script>
+</body>
+</html>

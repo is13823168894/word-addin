@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>插入图片</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 12px; margin: 0; font-size: 13px; background: #f0f0f0; }
+        .section { margin-bottom: 12px; }
+        .section-title { color: #c00000; font-weight: bold; margin-bottom: 5px; font-size: 13px; }
+        .radio-row { margin: 3px 0; }
+        .radio-row label { margin-right: 14px; cursor: pointer; }
+        .sub-options { margin-left: 20px; margin-top: 5px; display: none; }
+        .sub-options.active { display: block; }
+        .param-row { margin: 4px 0; display: flex; align-items: center; flex-wrap: wrap; }
+        .param-row label { display: inline-block; min-width: 44px; color: #555; font-size: 12px; }
+        .param-row input[type="text"] { width: 60px; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; }
+        .param-row input[type="text"].wide { width: 140px; }
+        .param-row span { margin: 0 4px; color: #666; font-size: 12px; }
+        .action-btn { background: #ffe0e0; border: 1px solid #c00000; color: #c00000; padding: 4px 10px; cursor: pointer; font-size: 12px; margin-left: 6px; }
+        .action-btn:hover { background: #ffc0c0; }
+        .tip { color: #888; font-size: 11px; margin-left: 6px; }
+        .divider { border: none; border-top: 1px solid #aaa; margin: 10px 0; }
+        .btn-area { margin-top: 14px; display: flex; justify-content: space-between; align-items: center; }
+        .btn { padding: 6px 18px; font-size: 13px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; }
+        .btn:hover { background: #d0d0d0; }
+        .btn-primary { background: #c00000; color: #fff; border-color: #a00000; }
+        .btn-primary:hover { background: #a00000; }
+        #statusText { margin-top: 8px; font-size: 12px; color: #2b579a; min-height: 16px; word-break: break-all; }
+        .folder-row { display: flex; align-items: center; margin: 4px 0; }
+        .folder-row input[type="text"] { flex: 1; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; margin-right: 6px; }
+        .folder-row .browse-btn { padding: 4px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; white-space: nowrap; }
+        .folder-row .browse-btn:hover { background: #d0d0d0; }
+        .file-count { font-size: 11px; color: #666; margin-left: 6px; white-space: nowrap; }
+        .img-select-row { display: flex; align-items: center; margin: 4px 0; }
+        .img-select-row input[type="text"] { flex: 1; padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; margin-right: 6px; }
+        .img-select-row .browse-btn { padding: 4px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; background: #e0e0e0; white-space: nowrap; }
+        .img-select-row .browse-btn:hover { background: #d0d0d0; }
+        .img-preview { max-width: 80px; max-height: 60px; margin-left: 6px; border: 1px solid #ccc; display: none; }
+        .progress-bar { width: 100%; height: 6px; background: #ddd; margin-top: 6px; display: none; border-radius: 3px; overflow: hidden; }
+        .progress-bar .fill { height: 100%; background: #2b579a; width: 0%; transition: width 0.2s; }
+        .coord-info { font-size: 11px; color: #c00000; margin-left: 6px; min-width: 80px; }
+        select { padding: 2px 4px; border: 1px solid #aaa; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <!-- 范围 -->
+    <div class="section">
+        <div class="section-title">范围：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="scope" value="current" checked> 当前文档</label>
+            <label><input type="radio" name="scope" value="multiple"> 多个 Word 文档</label>
+        </div>
+        <div id="folderOptions" class="sub-options">
+            <div class="folder-row">
+                <input type="text" id="folderPath" placeholder="输入文件夹路径或点击浏览选择...">
+                <button id="browseBtn" class="browse-btn">选择文件夹</button>
+                <span id="fileCount" class="file-count"></span>
+            </div>
+            <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;" accept=".docx">
+        </div>
+    </div>
+
+    <!-- 图片选择 -->
+    <div class="section">
+        <div class="section-title">选择要插入的图片：</div>
+        <div class="img-select-row">
+            <input type="text" id="imgPath" placeholder="未选择图片..." readonly>
+            <button id="imgBrowseBtn" class="browse-btn">浏览...</button>
+            <img id="imgPreview" class="img-preview" alt="">
+        </div>
+        <input type="file" id="imgInput" style="display:none;" accept="image/*">
+    </div>
+
+    <hr class="divider">
+
+    <!-- 插入位置 -->
+    <div class="section">
+        <div class="section-title">插入位置：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="insertMode" value="page" checked> 指定页面</label>
+            <label><input type="radio" name="insertMode" value="text"> 指定文字后</label>
+        </div>
+
+        <!-- 页面模式 -->
+        <div id="pageOptions" class="sub-options active">
+            <div class="param-row">
+                <label>页码：</label>
+                <input type="text" id="pageNum" value="1">
+                <span style="margin-left:4px;color:#888;">(1=首页, -1=末页, 负数从末页往前数)</span>
+            </div>
+            <div class="param-row">
+                <label>页内X：</label>
+                <input type="text" id="coordX" value="0">
+                <span>CM (距左边距)</span>
+                <label>页内Y：</label>
+                <input type="text" id="coordY" value="0">
+                <span>CM (距上方)</span>
+                <button id="getCoordBtn" class="action-btn">获取定位坐标</button>
+                <span id="coordInfo" class="coord-info"></span>
+            </div>
+            <div class="param-row" style="margin-top:2px;">
+                <button id="coordPageTop" class="action-btn" style="margin-left:0;">自动设为页面顶部</button>
+                <button id="coordPageCenter" class="action-btn">自动设为页面中心</button>
+            </div>
+        </div>
+
+        <!-- 文字模式 -->
+        <div id="textOptions" class="sub-options">
+            <div class="param-row">
+                <label>查找文字：</label>
+                <input type="text" id="searchText" class="wide" placeholder="输入要查找的文字">
+            </div>
+            <div class="param-row">
+                <label>坐落方式：</label>
+                <select id="alignment">
+                    <option value="inline">嵌入式紧随（文字同行后）</option>
+                    <option value="newline-left">换行后左对齐</option>
+                    <option value="newline-center">换行后居中</option>
+                    <option value="newline-right">换行后右对齐</option>
+                </select>
+            </div>
+            <div class="param-row">
+                <span class="tip" style="margin-left:0;">提示：查找文字大小写敏感，默认查找第一个匹配项</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图片尺寸 -->
+    <div class="section">
+        <div class="section-title">图片尺寸：</div>
+        <div class="radio-row">
+            <label><input type="radio" name="sizeMode" value="original" checked> 原始尺寸</label>
+            <label><input type="radio" name="sizeMode" value="custom"> 指定尺寸</label>
+        </div>
+        <div id="customSizeOptions" class="sub-options">
+            <div class="param-row">
+                <label>宽：</label>
+                <input type="text" id="customWidth" value="5">
+                <span>CM</span>
+                <label>高：</label>
+                <input type="text" id="customHeight" value="5">
+                <span>CM</span>
+                <span class="tip">留空则保持宽高比自动计算</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="btn-area">
+        <button id="defaultBtn" class="btn">默认设置</button>
+        <button id="okBtn" class="btn btn-primary">确 定</button>
+    </div>
+
+    <div id="progressBar" class="progress-bar"><div id="progressFill" class="fill"></div></div>
+    <p id="statusText">就绪 - 请先选择要插入的图片</p>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script>
+    // === 全局变量 ===
+    var CM_TO_POINT = 28.3464567;
+    var EMU_PER_CM = 360000;
+    var EMU_PER_PIXEL = 9525; // 96 DPI
+
+    var statusEl;
+    var imgBase64 = null;  // data:image/xxx;base64,... 完整 data URL
+    var imgRawBase64 = null; // 纯 base64 字符串(不含前缀)
+    var imgExt = 'png';    // 文件扩展名
+    var imgPixelsW = 0, imgPixelsH = 0; // 图片像素尺寸
+    var imgBuffer = null;  // ArrayBuffer（用于 JSZip 多文档处理）
+    var selectedFiles = [];
+
+    function $(id) { return document.getElementById(id); }
+
+    // === UI 初始化 ===
+    function initUI() {
+        statusEl = $('statusText');
+
+        // 范围切换
+        var scopeRadios = document.getElementsByName('scope');
+        for (var i = 0; i < scopeRadios.length; i++) {
+            scopeRadios[i].onclick = onScopeChange;
+        }
+
+        // 插入模式切换
+        var modeRadios = document.getElementsByName('insertMode');
+        for (var i = 0; i < modeRadios.length; i++) {
+            modeRadios[i].onclick = onModeChange;
+        }
+
+        // 尺寸模式切换
+        var sizeRadios = document.getElementsByName('sizeMode');
+        for (var i = 0; i < sizeRadios.length; i++) {
+            sizeRadios[i].onclick = onSizeModeChange;
+        }
+
+        // 按钮事件
+        $('browseBtn').onclick = function() { $('folderInput').click(); };
+        $('folderInput').onchange = onFolderSelected;
+        $('imgBrowseBtn').onclick = function() { $('imgInput').click(); };
+        $('imgInput').onchange = onImageSelected;
+        $('getCoordBtn').onclick = doGetCoord;
+        $('coordPageTop').onclick = function() { $('coordX').value = '0'; $('coordY').value = '0'; $('coordInfo').textContent = '已设为页面顶部'; };
+        $('coordPageCenter').onclick = function() { $('coordX').value = '6.5'; $('coordY').value = '10'; $('coordInfo').textContent = '已设为中心（A4近似）'; };
+        $('defaultBtn').onclick = doDefault;
+        $('okBtn').onclick = doInsert;
+
+        onScopeChange();
+        onModeChange();
+        onSizeModeChange();
+    }
+
+    function onScopeChange() {
+        var scope = getCheckedValue('scope');
+        $('folderOptions').className = scope === 'multiple' ? 'sub-options active' : 'sub-options';
+        if (scope === 'current') {
+            statusEl.textContent = imgBase64 ? '已选择图片，就绪' : '就绪 - 请先选择要插入的图片';
+        }
+    }
+
+    function onModeChange() {
+        var mode = getCheckedValue('insertMode');
+        $('pageOptions').className = mode === 'page' ? 'sub-options active' : 'sub-options';
+        $('textOptions').className = mode === 'text' ? 'sub-options active' : 'sub-options';
+    }
+
+    function onSizeModeChange() {
+        var mode = getCheckedValue('sizeMode');
+        $('customSizeOptions').className = mode === 'custom' ? 'sub-options active' : 'sub-options';
+    }
+
+    function getCheckedValue(name) {
+        var radios = document.getElementsByName(name);
+        for (var i = 0; i < radios.length; i++) {
+            if (radios[i].checked) return radios[i].value;
+        }
+        return '';
+    }
+
+    // === 图片选择 ===
+    function onImageSelected() {
+        var file = $('imgInput').files[0];
+        if (!file) return;
+
+        $('imgPath').value = file.name;
+
+        // 确定扩展名
+        var dot = file.name.lastIndexOf('.');
+        imgExt = dot >= 0 ? file.name.substring(dot + 1).toLowerCase() : 'png';
+        if (imgExt === 'jpg') imgExt = 'jpeg';
+        if (['png','jpeg','gif','bmp','tiff','svg'].indexOf(imgExt) < 0) imgExt = 'png';
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            imgBuffer = e.target.result; // ArrayBuffer
+            // 转 base64
+            var bytes = new Uint8Array(imgBuffer);
+            var binary = '';
+            for (var i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            imgRawBase64 = btoa(binary);
+            imgBase64 = 'data:image/' + imgExt + ';base64,' + imgRawBase64;
+
+            // 获取图片像素尺寸
+            var tempImg = new Image();
+            tempImg.onload = function() {
+                imgPixelsW = tempImg.naturalWidth;
+                imgPixelsH = tempImg.naturalHeight;
+                statusEl.textContent = '已选择: ' + file.name + ' (' + imgPixelsW + 'x' + imgPixelsH + 'px)';
+            };
+            tempImg.onerror = function() {
+                statusEl.textContent = '已选择: ' + file.name + ' (无法读取尺寸)';
+            };
+            tempImg.src = imgBase64;
+
+            // 预览
+            var preview = $('imgPreview');
+            preview.src = imgBase64;
+            preview.style.display = 'inline';
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // === 文件夹选择 ===
+    function onFolderSelected() {
+        selectedFiles = [];
+        var files = $('folderInput').files;
+        var count = 0;
+        for (var i = 0; i < files.length; i++) {
+            var name = files[i].name.toLowerCase();
+            if (name.endsWith('.docx') || name.endsWith('.doc')) {
+                selectedFiles.push(files[i]);
+                count++;
+            }
+        }
+        if (count > 0) {
+            $('folderPath').value = '已选择 ' + count + ' 个 Word 文件';
+            $('fileCount').textContent = '(' + count + '个)';
+            statusEl.textContent = '已选择 ' + count + ' 个文件，点击【确定】开始处理';
+        } else {
+            $('folderPath').value = '';
+            $('fileCount').textContent = '(未找到 .docx 文件)';
+            statusEl.textContent = '未在所选文件夹中找到 Word 文件';
+        }
+    }
+
+    // === 默认设置 ===
+    function doDefault() {
+        var radios;
+        radios = document.getElementsByName('scope'); radios[0].checked = true;
+        radios = document.getElementsByName('insertMode'); radios[0].checked = true;
+        radios = document.getElementsByName('sizeMode'); radios[0].checked = true;
+        $('pageNum').value = '1';
+        $('coordX').value = '0';
+        $('coordY').value = '0';
+        $('searchText').value = '';
+        $('alignment').value = 'inline';
+        $('customWidth').value = '5';
+        $('customHeight').value = '5';
+        $('coordInfo').textContent = '';
+        onScopeChange();
+        onModeChange();
+        onSizeModeChange();
+        statusEl.textContent = '已恢复默认设置';
+    }
+
+    // === 获取定位坐标 ===
+    function doGetCoord() {
+        statusEl.textContent = '正在获取位置坐标...';
+        $('coordInfo').textContent = '';
+        Word.run(function(context) {
+            var selection = context.document.getSelection();
+            // 优先检查选区中的浮动图形（可拿到页面绝对坐标）
+            var shapes = selection.shapes;
+            shapes.load('items');
+            return context.sync().then(function() {
+                if (shapes.items.length > 0) {
+                    // 浮动图形：shape.left / shape.top 接近页面绝对坐标
+                    var shape = shapes.items[0];
+                    shape.load('left,top,width,height,relativeHorizontalPosition,relativeVerticalPosition,wrapType');
+                    return context.sync().then(function() {
+                        // 调整：shape.left 可能是相对于页边距/段落/页面，根据 relativeHorizontalPosition 决定是否要加页边距
+                        // 简化处理：直接用 shape.left/top 作为页面坐标（用户可微调）
+                        var x = (shape.left / CM_TO_POINT).toFixed(2);
+                        var y = (shape.top / CM_TO_POINT).toFixed(2);
+                        var w = (shape.width / CM_TO_POINT).toFixed(2);
+                        var h = (shape.height / CM_TO_POINT).toFixed(2);
+                        var relH = shape.relativeHorizontalPosition || 'page';
+                        var relV = shape.relativeVerticalPosition || 'page';
+                        $('coordX').value = x;
+                        $('coordY').value = y;
+                        $('coordInfo').textContent = '浮动图形 (X=' + x + ' Y=' + y + ' W=' + w + ' H=' + h + ' CM, 相对' + relH + '/' + relV + ')';
+                        statusEl.textContent = '已获取浮动图形坐标';
+                    });
+                }
+                // 检查嵌入式图片
+                var inlinePics = selection.inlinePictures;
+                inlinePics.load('items');
+                return context.sync().then(function() {
+                    if (inlinePics.items.length > 0) {
+                        var pic = inlinePics.items[0];
+                        var picRange = pic.getRange();
+                        var paragraphs = picRange.paragraphs;
+                        paragraphs.load('items');
+                        return context.sync().then(function() {
+                            if (paragraphs.items.length > 0) {
+                                var para = paragraphs.items[0];
+                                para.load('leftIndent,spaceBefore');
+                                return context.sync().then(function() {
+                                    var x = ((para.leftIndent || 0) / CM_TO_POINT).toFixed(2);
+                                    var y = ((para.spaceBefore || 0) / CM_TO_POINT).toFixed(2);
+                                    $('coordX').value = x;
+                                    $('coordY').value = y;
+                                    $('coordInfo').textContent = '嵌入式图片段落 (X=左缩进' + x + ' Y=段前距' + y + ' CM)';
+                                    statusEl.textContent = '已获取嵌入式图片位置，Y 为段前距（实际页面 Y 需估算）';
+                                });
+                            }
+                            statusEl.textContent = '嵌入式图片未关联到段落';
+                        });
+                    }
+                    // 光标在文本中：从段落 leftIndent + spaceBefore 推算
+                    var range = selection.getRange('start');
+                    var paragraphs = range.paragraphs;
+                    paragraphs.load('items');
+                    return context.sync().then(function() {
+                        if (paragraphs.items.length > 0) {
+                            var para = paragraphs.items[0];
+                            para.load('leftIndent,spaceBefore');
+                            return context.sync().then(function() {
+                                var x = ((para.leftIndent || 0) / CM_TO_POINT).toFixed(2);
+                                var y = ((para.spaceBefore || 0) / CM_TO_POINT).toFixed(2);
+                                $('coordX').value = x;
+                                $('coordY').value = y;
+                                $('coordInfo').textContent = '段落 (X=左缩进' + x + ' Y=段前距' + y + ' CM)，Y 实际页面位置需估算';
+                                statusEl.textContent = '已获取段落属性，Y 为段前距（实际页面 Y 需估算）';
+                            });
+                        } else {
+                            $('coordX').value = '0';
+                            $('coordY').value = '0';
+                            $('coordInfo').textContent = '未检测到位置信息';
+                            statusEl.textContent = '请将光标放在目标位置后重试';
+                        }
+                    });
+                });
+            });
+        }).catch(function(error) {
+            statusEl.textContent = '获取坐标失败: ' + error.message;
+            $('coordInfo').textContent = '获取失败';
+        });
+    }
+
+    // === 获取选项 ===
+    function getOptions() {
+        var customW = parseFloat($('customWidth').value);
+        var customH = parseFloat($('customHeight').value);
+        return {
+            scope: getCheckedValue('scope'),
+            insertMode: getCheckedValue('insertMode'),
+            pageNum: parseInt($('pageNum').value, 10) || 1,
+            coordX: parseFloat($('coordX').value) || 0,
+            coordY: parseFloat($('coordY').value) || 0,
+            searchText: $('searchText').value,
+            alignment: $('alignment').value,
+            sizeMode: getCheckedValue('sizeMode'),
+            customWidth: isNaN(customW) ? 0 : customW,
+            customHeight: isNaN(customH) ? 0 : customH
+        };
+    }
+
+    // ============================================================
+    // === 当前文档插入（Word JS API） ===
+    // ============================================================
+    function doInsertCurrent(opts) {
+        Word.run(function(context) {
+            var body = context.document.body;
+
+            if (opts.insertMode === 'page') {
+                return insertAtPage(context, body, opts);
+            } else {
+                return insertAfterText(context, body, opts);
+            }
+        }).catch(function(error) {
+            statusEl.textContent = '插入失败: ' + error.message;
+        });
+    }
+
+    // --- 按页码插入 ---
+    function insertAtPage(context, body, opts) {
+        // 搜索 "^m" (手动分页符) 来计数页面
+        var searchResults = body.search('^m', { matchWildcards: false });
+        searchResults.load('items');
+        return context.sync().then(function() {
+            // 计算总页数，以手动分页符+1作为总页数
+            var totalPages = searchResults.items.length + 1;
+            var targetPage = opts.pageNum;
+
+            // 处理负页码（-1=末页, -2=倒数第二页...）
+            if (targetPage < 0) {
+                targetPage = totalPages + targetPage + 1;
+            }
+            if (targetPage < 1) targetPage = 1;
+            if (targetPage > totalPages) targetPage = totalPages;
+
+            if (targetPage === 1) {
+                // 第一页：从文档开头开始
+                return insertPictureAtRange(context, body.getRange('start'), opts, true);
+            } else {
+                // 第N页：找到第(N-1)个分页符之后的 range
+                var breakItem = searchResults.items[targetPage - 2];
+                return insertPictureAtRange(context, breakItem.getRange('after'), opts, true);
+            }
+        });
+    }
+
+    // --- 按文字后插入 ---
+    function insertAfterText(context, body, opts) {
+        if (!opts.searchText) {
+            statusEl.textContent = '请输入要查找的文字';
+            return context.sync();
+        }
+
+        var searchResults = body.search(opts.searchText, { matchCase: true, matchWholeWord: false });
+        searchResults.load('items');
+        return context.sync().then(function() {
+            if (searchResults.items.length === 0) {
+                statusEl.textContent = '未找到文字: "' + opts.searchText + '"';
+                return context.sync();
+            }
+
+            var foundRange = searchResults.items[0];
+            var afterRange = foundRange.getRange('after');
+            return insertPictureAtRange(context, afterRange, opts, false);
+        });
+    }
+
+    // --- 在指定 Range 处插入图片（内部实现） ---
+    function insertPictureAtRange(context, range, opts, isPageMode) {
+        // 非 inline 文字模式：先插入换行符，使图片出现在新行
+        if (!isPageMode && opts.alignment !== 'inline') {
+            range.insertBreak('Line', 'Before');
+            return context.sync().then(function() {
+                return doInsertPicture(context, range, opts, isPageMode);
+            });
+        }
+        return doInsertPicture(context, range, opts, isPageMode);
+    }
+
+    function doInsertPicture(context, range, opts, isPageMode) {
+        // 计算目标尺寸
+        var targetWidth = 0, targetHeight = 0;
+        if (opts.sizeMode === 'custom') {
+            targetWidth = opts.customWidth * CM_TO_POINT;
+            targetHeight = opts.customHeight * CM_TO_POINT;
+        }
+
+        // 页面模式 + 有坐标 → 插入浮动图片（绝对坐标），否则用内联图片
+        var needFloat = isPageMode && (opts.coordX > 0 || opts.coordY > 0);
+
+        // 先插入内联图片（让 Word 注册图片数据并分配 rId）
+        var pic = range.insertInlinePictureFromBase64(imgRawBase64);
+        pic.load('width,height');
+        return context.sync().then(function() {
+            // 调整尺寸
+            if (opts.sizeMode === 'custom' && targetWidth > 0 && targetHeight > 0) {
+                pic.width = targetWidth;
+                pic.height = targetHeight;
+            } else if (opts.sizeMode === 'custom' && targetWidth > 0) {
+                var ratio = pic.height / pic.width;
+                pic.width = targetWidth;
+                pic.height = targetWidth * ratio;
+            } else if (opts.sizeMode === 'custom' && targetHeight > 0) {
+                var ratio2 = pic.width / pic.height;
+                pic.height = targetHeight;
+                pic.width = targetHeight * ratio2;
+            }
+
+            return context.sync().then(function() {
+                // 获取图片所在段落
+                var parentRange = pic.parentRange;
+                var paragraphs = parentRange.paragraphs;
+                paragraphs.load('items');
+                return context.sync().then(function() {
+                    if (paragraphs.items.length === 0) {
+                        statusEl.textContent = '未找到图片段落';
+                        return;
+                    }
+
+                    if (needFloat) {
+                        // ===== 浮动图片：获取 Word 生成的段落 OOXML，inline→anchor 转换 =====
+                        var paraRange = paragraphs.items[0].getRange();
+                        var ooxmlResult = paraRange.getOoxml();
+                        return context.sync().then(function() {
+                            var flatOpc = ooxmlResult.value;
+                            // 计算 EMU 位置
+                            var posX = Math.round(opts.coordX * EMU_PER_CM);
+                            var posY = Math.round(opts.coordY * EMU_PER_CM);
+                            // 构建 anchor 替换字符串（包含位置属性）
+                            var anchorTag = '<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" ' +
+                                'relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">' +
+                                '<wp:simplePos x="0" y="0"/>' +
+                                '<wp:positionH relativeFrom="page"><wp:posOffset>' + posX + '</wp:posOffset></wp:positionH>' +
+                                '<wp:positionV relativeFrom="page"><wp:posOffset>' + posY + '</wp:posOffset></wp:positionV>' +
+                                '<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>';
+                            // 替换：<wp:inline ...> → anchor，</wp:inline> → </wp:anchor>
+                            var modified = flatOpc.replace(/<wp:inline\b[^>]*>/g, anchorTag);
+                            modified = modified.replace(/<\/wp:inline>/g, '</wp:anchor>');
+                            // 用修改后的 Flat OPC 替换段落
+                            paraRange.insertOoxml(modified, 'Replace');
+                            return context.sync().then(function() {
+                                statusEl.textContent = '浮动图插入成功 (X=' + opts.coordX + ' Y=' + opts.coordY + ' CM)';
+                            });
+                        });
+                    }
+
+                    // ===== 内联图片（无坐标或文字模式） =====
+                    var para = paragraphs.items[0];
+                    para.load('alignment,leftIndent,spaceBefore,spaceAfter');
+                    return context.sync().then(function() {
+                        if (isPageMode) {
+                            para.spaceAfter = 0;
+                        } else {
+                            para.leftIndent = 0;
+                            if (opts.alignment === 'newline-left' || opts.alignment === 'inline') {
+                                para.alignment = 'Left';
+                            } else if (opts.alignment === 'newline-center') {
+                                para.alignment = 'Centered';
+                            } else if (opts.alignment === 'newline-right') {
+                                para.alignment = 'Right';
+                            }
+                        }
+                        return context.sync().then(function() {
+                            statusEl.textContent = '图片已插入成功';
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    // ============================================================
+    // === 多个文档处理（JSZip） ===
+    // ============================================================
+    function doInsertMultiple(opts) {
+        if (selectedFiles.length === 0) {
+            statusEl.textContent = '请先选择文件夹';
+            return;
+        }
+        if (!imgBuffer || !imgRawBase64) {
+            statusEl.textContent = '请先选择要插入的图片';
+            return;
+        }
+        if (opts.insertMode === 'text' && !opts.searchText) {
+            statusEl.textContent = '请输入要查找的文字';
+            return;
+        }
+
+        statusEl.textContent = '正在处理 ' + selectedFiles.length + ' 个文件...';
+        showProgress(0);
+
+        if (typeof JSZip === 'undefined') {
+            statusEl.textContent = 'JSZip 未加载，请刷新页面重试';
+            return;
+        }
+
+        var total = selectedFiles.length;
+        var processed = [];
+        var idx = 0;
+
+        function processNext() {
+            if (idx >= total) {
+                finishMultiple(processed);
+                return;
+            }
+            var file = selectedFiles[idx];
+            statusEl.textContent = '正在处理 (' + (idx + 1) + '/' + total + '): ' + file.name;
+            showProgress(Math.round((idx / total) * 100));
+
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                processOneDocx(e.target.result, file.name, opts).then(function(result) {
+                    processed.push({ name: file.name, data: result, changed: true });
+                    idx++;
+                    setTimeout(processNext, 50);
+                }).catch(function(err) {
+                    processed.push({ name: file.name, data: null, changed: false, error: err.message });
+                    idx++;
+                    setTimeout(processNext, 50);
+                });
+            };
+            reader.onerror = function() {
+                processed.push({ name: file.name, data: null, changed: false, error: '读取失败' });
+                idx++;
+                setTimeout(processNext, 50);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        processNext();
+    }
+
+    function processOneDocx(arrayBuffer, fileName, opts) {
+        return JSZip.loadAsync(arrayBuffer).then(function(zip) {
+            var docPath = 'word/document.xml';
+            var relsPath = 'word/_rels/document.xml.rels';
+            var typesPath = '[Content_Types].xml';
+
+            return readZipText(zip, docPath).then(function(xmlStr) {
+                var parser = new DOMParser();
+                var xmlDoc = parser.parseFromString(xmlStr, 'text/xml');
+                var body = xmlDoc.getElementsByTagNameNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'body');
+                if (body.length === 0) body = xmlDoc.getElementsByTagName('w:body');
+                if (body.length === 0) return arrayBuffer;
+
+                body = body[0];
+
+                // 计算图片 EMU 尺寸
+                var imgEw, imgEh;
+                if (opts.sizeMode === 'custom' && opts.customWidth > 0 && opts.customHeight > 0) {
+                    imgEw = Math.round(opts.customWidth * EMU_PER_CM);
+                    imgEh = Math.round(opts.customHeight * EMU_PER_CM);
+                } else if (opts.sizeMode === 'custom' && opts.customWidth > 0) {
+                    imgEw = Math.round(opts.customWidth * EMU_PER_CM);
+                    imgEh = Math.round(imgEw * imgPixelsH / imgPixelsW);
+                } else if (opts.sizeMode === 'custom' && opts.customHeight > 0) {
+                    imgEh = Math.round(opts.customHeight * EMU_PER_CM);
+                    imgEw = Math.round(imgEh * imgPixelsW / imgPixelsH);
+                } else {
+                    imgEw = imgPixelsW * EMU_PER_PIXEL;
+                    imgEh = imgPixelsH * EMU_PER_PIXEL;
+                }
+
+                // 确定插入位置
+                var insertBefore = null; // 在此节点前插入
+                var insertParagraph = null; // 在此段落中添加
+                var insertMode = 'start'; // start, beforeNode, append
+
+                if (opts.insertMode === 'page') {
+                    // 按页码：收集分页符
+                    var pageBreaks = [];
+                    var allBrs = xmlDoc.getElementsByTagNameNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'br');
+                    if (allBrs.length === 0) allBrs = xmlDoc.getElementsByTagName('w:br');
+                    for (var i = 0; i < allBrs.length; i++) {
+                        if (allBrs[i].getAttribute('w:type') === 'page' || allBrs[i].getAttribute('type') === 'page') {
+                            pageBreaks.push(allBrs[i]);
+                        }
+                    }
+
+                    var totalPages = pageBreaks.length + 1;
+                    var targetPage = opts.pageNum;
+                    if (targetPage < 0) targetPage = totalPages + targetPage + 1;
+                    if (targetPage < 1) targetPage = 1;
+                    if (targetPage > totalPages) targetPage = totalPages;
+
+                    if (targetPage === 1) {
+                        // 第一页：在 body 最前面插入
+                        var firstChild = body.firstChild;
+                        if (firstChild) {
+                            insertBefore = firstChild;
+                            insertMode = 'beforeNode';
+                        } else {
+                            insertMode = 'start';
+                        }
+                    } else {
+                        // 在第(N-1)个分页符之后插入
+                        var targetBreak = pageBreaks[targetPage - 2];
+                        // 找到分页符所在段落之后的兄弟节点
+                        var brNode = targetBreak;
+                        var para = brNode.parentNode;
+                        while (para && para !== body && para.tagName !== 'w:p' && para.tagName.indexOf('p') === -1) {
+                            para = para.parentNode;
+                        }
+                        if (para && para.nextSibling) {
+                            insertBefore = para.nextSibling;
+                            insertMode = 'beforeNode';
+                        } else {
+                            // 在末尾追加
+                            insertMode = 'append';
+                        }
+                    }
+                } else if (opts.insertMode === 'text') {
+                    // 按文字查找
+                    var tNodes = xmlDoc.getElementsByTagNameNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 't');
+                    if (tNodes.length === 0) tNodes = xmlDoc.getElementsByTagName('w:t');
+                    var foundNode = null;
+                    for (var ti = 0; ti < tNodes.length; ti++) {
+                        var text = getTextContent(tNodes[ti]);
+                        if (text.indexOf(opts.searchText) >= 0) {
+                            foundNode = tNodes[ti];
+                            break;
+                        }
+                    }
+                    if (foundNode) {
+                        // 找到文字所在段落
+                        var textPara = foundNode.parentNode;
+                        while (textPara && textPara.tagName !== 'w:p' && textPara.tagName.indexOf('p') === -1) {
+                            textPara = textPara.parentNode;
+                        }
+                        if (opts.alignment === 'inline') {
+                            // 嵌入式紧随：在文字的 run 之后添加图片 run
+                            var rNode = foundNode.parentNode;
+                            while (rNode && rNode.tagName !== 'w:r' && rNode.tagName.indexOf('r') !== 0) {
+                                rNode = rNode.parentNode;
+                            }
+                            if (rNode && rNode.nextSibling) {
+                                insertBefore = rNode.nextSibling;
+                                insertMode = 'beforeNode';
+                                insertParagraph = textPara;
+                            } else if (rNode) {
+                                insertBefore = null;
+                                insertMode = 'append';
+                                insertParagraph = textPara;
+                            }
+                        } else {
+                            // 换行模式：在段落之后插入新段落
+                            if (textPara && textPara.nextSibling) {
+                                insertBefore = textPara.nextSibling;
+                                insertMode = 'beforeNode';
+                            } else {
+                                insertMode = 'append';
+                            }
+                        }
+                    } else {
+                        // 未找到文字，插在文档末尾
+                        insertMode = 'append';
+                    }
+                }
+
+                // 生成图片唯一名称
+                var imgName = 'image_' + Date.now() + '.' + imgExt;
+                var imgPath = 'word/media/' + imgName;
+
+                // 添加图片到 zip
+                zip.file(imgPath, imgBuffer);
+
+                var newRId = 'rIdNew'; // 临时 ID，后续从 rels 文件自动编号
+
+                // 更新 rels
+                return readZipText(zip, relsPath).then(function(relsStr) {
+                    if (relsStr) {
+                        var relsDoc = new DOMParser().parseFromString(relsStr, 'text/xml');
+                        var relsRoot = relsDoc.documentElement;
+                        // 找到最大 Id
+                        var relationships = relsDoc.getElementsByTagName('Relationship');
+                        var maxId = 0;
+                        for (var ri = 0; ri < relationships.length; ri++) {
+                            var rid = relationships[ri].getAttribute('Id');
+                            var num = parseInt(rid.replace(/[^0-9]/g, ''), 10);
+                            if (!isNaN(num) && num > maxId) maxId = num;
+                        }
+                        newRId = 'rId' + (maxId + 1);
+
+                        // 添加新的 Relationship
+                        var newRel = relsDoc.createElement('Relationship');
+                        newRel.setAttribute('Id', newRId);
+                        newRel.setAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image');
+                        newRel.setAttribute('Target', 'media/' + imgName);
+                        relsRoot.appendChild(newRel);
+
+                        var serializer = new XMLSerializer();
+                        zip.file(relsPath, serializer.serializeToString(relsDoc));
+                    }
+
+                    // 更新 [Content_Types].xml
+                    return readZipText(zip, typesPath).then(function(typesStr) {
+                        if (typesStr) {
+                            var typesDoc = new DOMParser().parseFromString(typesStr, 'text/xml');
+                            var typesRoot = typesDoc.documentElement;
+                            // 检查是否已有该扩展名类型
+                            var typeExists = false;
+                            var overrides = typesDoc.getElementsByTagName('Override');
+                            var extKey = '/media/' + imgName;
+                            for (var oi = 0; oi < overrides.length; oi++) {
+                                if (overrides[oi].getAttribute('PartName') === '/' + imgPath) {
+                                    typeExists = true;
+                                    break;
+                                }
+                            }
+                            if (!typeExists) {
+                                var imgTypeMap = { png: 'image/png', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', tiff: 'image/tiff', svg: 'image/svg+xml' };
+                                var mimeType = imgTypeMap[imgExt] || 'image/png';
+                                var newOverride = typesDoc.createElement('Override');
+                                newOverride.setAttribute('PartName', '/' + imgPath);
+                                newOverride.setAttribute('ContentType', mimeType);
+                                typesRoot.appendChild(newOverride);
+
+                                var serializer2 = new XMLSerializer();
+                                zip.file(typesPath, serializer2.serializeToString(typesDoc));
+                            }
+                        }
+
+                        // 构造 drawing XML
+                        var drawingXml = buildDrawingXml(imgEw, imgEh, newRId, opts);
+
+                        // 解析 drawing XML
+                        var docParser = new DOMParser();
+                        var drawingDoc = docParser.parseFromString(drawingXml, 'text/xml');
+                        var drawingRoot = drawingDoc.documentElement;
+
+                        var isAnchor = (drawingRoot.tagName === 'p' || drawingRoot.tagName === 'w:p');
+                        var pEl;
+
+                        if (isAnchor) {
+                            // 浮动图片：buildDrawingXml 返回完整 <w:p>，直接 import 使用
+                            pEl = xmlDoc.importNode(drawingRoot, true);
+                        } else {
+                            // 内联图片：创建 w:p 包裹 drawing
+                            pEl = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'p');
+
+                            // 如果是文字模式非inline，需要创建新段落并设置对齐
+                            if (opts.insertMode === 'text' && opts.alignment !== 'inline') {
+                                var pPr = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'pPr');
+                                var jc = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'jc');
+                                var alignVal = 'left';
+                                if (opts.alignment === 'newline-center') alignVal = 'center';
+                                else if (opts.alignment === 'newline-right') alignVal = 'right';
+                                jc.setAttribute('w:val', alignVal);
+                                pPr.appendChild(jc);
+                                pEl.appendChild(pPr);
+                            }
+
+                            // 创建 w:r 包裹 drawing
+                            var rEl = xmlDoc.createElementNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'r');
+                            var importedDraw = xmlDoc.importNode(drawingRoot, true);
+                            rEl.appendChild(importedDraw);
+                            pEl.appendChild(rEl);
+                        }
+
+                        // 插入到文档
+                        if (insertMode === 'start') {
+                            if (body.firstChild) {
+                                body.insertBefore(pEl, body.firstChild);
+                            } else {
+                                body.appendChild(pEl);
+                            }
+                        } else if (insertMode === 'beforeNode' && insertBefore) {
+                            if (insertParagraph && opts.insertMode === 'text' && opts.alignment === 'inline') {
+                                // inline 模式：插入到文字段落中
+                                insertParagraph.insertBefore(pEl, insertBefore);
+                            } else {
+                                body.insertBefore(pEl, insertBefore);
+                            }
+                        } else {
+                            body.appendChild(pEl);
+                        }
+
+                        // 保存 XML
+                        var serializer3 = new XMLSerializer();
+                        zip.file(docPath, serializer3.serializeToString(xmlDoc));
+
+                        return zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+                    });
+                });
+            });
+        });
+    }
+
+    function buildDrawingXml(ew, eh, rId, opts) {
+        var docPrId = Math.floor(Math.random() * 100000);
+        // 页面模式 + 有坐标 → 浮动图片（wp:anchor）
+        if (opts.insertMode === 'page' && (opts.coordX > 0 || opts.coordY > 0)) {
+            var posX = Math.round(opts.coordX * EMU_PER_CM);
+            var posY = Math.round(opts.coordY * EMU_PER_CM);
+            return '<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+                'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
+                'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+                'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ' +
+                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+                '<w:r><w:drawing>' +
+                '<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" ' +
+                'relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">' +
+                '<wp:simplePos x="0" y="0"/>' +
+                '<wp:positionH relativeFrom="page"><wp:posOffset>' + posX + '</wp:posOffset></wp:positionH>' +
+                '<wp:positionV relativeFrom="page"><wp:posOffset>' + posY + '</wp:posOffset></wp:positionV>' +
+                '<wp:extent cx="' + ew + '" cy="' + eh + '"/>' +
+                '<wp:effectExtent l="0" t="0" r="0" b="0"/>' +
+                '<wp:wrapNone/>' +
+                '<wp:docPr id="' + docPrId + '" name="Picture"/>' +
+                '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
+                '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+                '<pic:pic>' +
+                '<pic:nvPicPr><pic:cNvPr id="0" name="Picture"/><pic:cNvPicPr/></pic:nvPicPr>' +
+                '<pic:blipFill><a:blip r:embed="' + rId + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+                '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + ew + '" cy="' + eh + '"/></a:xfrm>' +
+                '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' +
+                '</pic:pic></a:graphicData></a:graphic>' +
+                '</wp:anchor></w:drawing></w:r></w:p>';
+        }
+        // 默认：内联图片（wp:inline）
+        return '<w:drawing xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+            'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
+            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+            'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ' +
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+            '<wp:inline distT="0" distB="0" distL="0" distR="0">' +
+            '<wp:extent cx="' + ew + '" cy="' + eh + '"/>' +
+            '<wp:docPr id="' + docPrId + '" name="Picture" descr="Inserted by add-in"/>' +
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+            '<pic:pic>' +
+            '<pic:nvPicPr><pic:cNvPr id="0" name="Picture"/><pic:cNvPicPr/></pic:nvPicPr>' +
+            '<pic:blipFill><a:blip r:embed="' + rId + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+            '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + ew + '" cy="' + eh + '"/></a:xfrm>' +
+            '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' +
+            '</pic:pic></a:graphicData></a:graphic>' +
+            '</wp:inline></w:drawing>';
+    }
+
+    function getTextContent(node) {
+        var text = '';
+        for (var c = node.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 3) text += c.nodeValue;
+            else if (c.nodeType === 1) text += getTextContent(c);
+        }
+        return text;
+    }
+
+    function readZipText(zip, path) {
+        var file = zip.file(path);
+        if (!file) return Promise.resolve('');
+        return file.async('text');
+    }
+
+    function finishMultiple(processed) {
+        showProgress(100);
+        var changed = [];
+        var errors = [];
+        for (var i = 0; i < processed.length; i++) {
+            if (processed[i].changed && processed[i].data) changed.push(processed[i]);
+            if (!processed[i].changed) errors.push(processed[i].name);
+        }
+
+        if (changed.length === 0) {
+            statusEl.textContent = '处理完成，但未能插入图片。共处理 ' + processed.length + ' 个文件。';
+            hideProgress();
+            return;
+        }
+
+        statusEl.textContent = '正在打包下载...';
+
+        if (changed.length === 1) {
+            var blob = new Blob([changed[0].data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            triggerDownload(blob, changed[0].name);
+            statusEl.textContent = '处理完成：1 个文件已下载（图片已插入）';
+        } else {
+            var outZip = new JSZip();
+            for (var i = 0; i < changed.length; i++) {
+                outZip.file(changed[i].name, changed[i].data);
+            }
+            outZip.generateAsync({ type: 'blob', compression: 'DEFLATE' }).then(function(content) {
+                triggerDownload(content, '插入图片结果.zip');
+                statusEl.textContent = '处理完成：' + changed.length + ' 个文件已打包下载';
+            });
+        }
+        hideProgress();
+    }
+
+    function triggerDownload(blob, filename) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    function showProgress(pct) {
+        $('progressBar').style.display = 'block';
+        $('progressFill').style.width = pct + '%';
+    }
+
+    function hideProgress() {
+        setTimeout(function() {
+            $('progressBar').style.display = 'none';
+            $('progressFill').style.width = '0%';
+        }, 2000);
+    }
+
+    // === 主入口 ===
+    function doInsert() {
+        var opts = getOptions();
+
+        if (!imgBase64 || !imgRawBase64) {
+            statusEl.textContent = '请先选择要插入的图片';
+            return;
+        }
+        if (opts.insertMode === 'text' && !opts.searchText) {
+            statusEl.textContent = '请输入要查找的文字';
+            return;
+        }
+        if (opts.insertMode === 'page' && (isNaN(opts.pageNum) || opts.pageNum === 0)) {
+            statusEl.textContent = '请输入有效的页码（非零整数）';
+            return;
+        }
+
+        statusEl.textContent = '正在插入图片...';
+        statusEl.style.color = '#2b579a';
+
+        if (opts.scope === 'multiple') {
+            doInsertMultiple(opts);
+        } else {
+            doInsertCurrent(opts);
+        }
+    }
+
+    Office.onReady(function(info) {
+        initUI();
+        if (info.host !== Office.HostType.Word) {
+            statusEl.textContent = '请在 Word 中使用';
+        }
+    });
+    </script>
+</body>
+</html>
